@@ -5,8 +5,9 @@ compatibility_date = "2026-08-19"
 [[d1_databases]]
 binding = "DB"
 database_name = "folai-h5-core-db"
-database_id = "REPLACE_WITH_D1_DATABASE_ID"
+database_id = "965942e2-955e-4166-a0d7-0b9496d0bfe7"
 
 [[r2_buckets]]
 binding = "PRAYER_MEDIA"
 bucket_name = "folai-prayer-media"
+

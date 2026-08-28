@@ -73,7 +73,7 @@ function shell(content) {
             <div class="brand-mark">佛</div>
             <div><h1 class="brand-title">佛来运转</h1><p class="brand-subtitle">低成本 H5 核心闭环</p></div>
           </div>
-          <nav class="tabs">
+          <nav class="tabs top-tabs">
             ${tabButton('intro', '项目介绍')}
             ${tabButton('release', '发布需求')}
             ${tabButton('query', '需求查询')}
@@ -84,6 +84,12 @@ function shell(content) {
         </div>
       </header>
       <main>${profileBar()}${content}</main>
+      <nav class="bottom-nav">
+        ${bottomButton('intro', '首页')}
+        ${bottomButton('release', '发布')}
+        ${bottomButton('query', '查询')}
+        ${bottomButton('mine', '我的')}
+      </nav>
       <footer class="footer">第一版只保留祈福核心流程，旧商城、钱包、分销、营销功能不进入本项目。</footer>
     </div>`;
 }
@@ -97,18 +103,49 @@ function tabButton(id, label) {
   return `<button class="tab ${state.tab === id ? 'active' : ''}" data-tab="${id}">${label}</button>`;
 }
 
+function bottomButton(id, label) {
+  return `<button class="nav-item ${state.tab === id ? 'active' : ''}" data-tab="${id}"><span>${label}</span></button>`;
+}
+
 function renderIntro() {
+  const pending = state.blessings.filter((b) => b.status !== 'COMPLETED' && b.status !== 'CANCELLED').length;
+  const completed = state.blessings.filter((b) => b.status === 'COMPLETED').length;
   return `
-    <section class="hero">
-      <h1>佛来运转</h1>
-      <p>把原 App 和小程序收缩为一个手机网页：终端用户登记手机、填写渠道码、一次提交多个祈福项目，工作人员接单、流转、上传现场照片视频，用户在“我的需求”查看待完成和已完成相册。</p>
+    <section class="mobile-hero">
+      <div class="hero-copy">
+        <h1>佛来运转</h1>
+        <p class="hero-kicker">用心祈愿&nbsp;&nbsp;福佑随行</p>
+        <p>寺院为您虔心祈福，愿所求皆所愿，所行化坦途。</p>
+      </div>
+      <div class="hero-photo" aria-hidden="true"></div>
     </section>
-    <section class="grid">
-      <div class="panel"><h2>终端用户</h2><p>手机登记，设置昵称，发布需求，保存需求编号和查询码，在我的需求中查看待完成、已完成和相册。</p></div>
-      <div class="panel"><h2>接单员</h2><p>用渠道码识别来源，确认接单，上传照片或视频，必要时流转给其他接单员，完成后用户可查看。</p></div>
-      <div class="panel"><h2>低成本后台</h2><p>Cloudflare Pages Functions 负责接口，D1 保存需求和流转，R2 保存图片视频，不再维护 App Store 和小程序。</p></div>
+    <section class="primary-entry" data-tab="release" role="button" tabindex="0">
+      <div>
+        <strong>发布需求</strong>
+        <span>填写祈福信息，提交寺院祈福</span>
+      </div>
+      <span class="entry-arrow">&rsaquo;</span>
     </section>
-    <section class="panel section"><h2>祈福项目</h2><div class="card-list">${state.rituals.map(ritualCard).join('')}</div></section>`;
+    <section class="quick-panel">
+      <button class="quick-row" data-tab="mine"><span class="quick-title">手机登记</span><span class="quick-sub">用于接收进度与查看相册</span><span>&rsaquo;</span></button>
+      <button class="quick-row" data-tab="release"><span class="quick-title">渠道码</span><span class="quick-sub">${escapeHtml(state.profile.channel_code || '请输入接单员渠道码')}</span><span>&rsaquo;</span></button>
+    </section>
+    <section class="quick-panel">
+      <button class="quick-row large" data-tab="query"><span class="quick-title">需求查询</span><span class="quick-sub">输入编号和查询码，查看进度</span><span>&rsaquo;</span></button>
+      <button class="quick-row large" data-tab="mine"><span class="quick-title">我的需求</span><span class="quick-sub">查看我发布的所有祈福记录</span><span>&rsaquo;</span></button>
+    </section>
+    <section class="status-strip">
+      <p>愿您的祈愿，早日圆满</p>
+      <div class="status-pair">
+        <button data-tab="mine"><strong>${pending}</strong><span>待完成</span></button>
+        <button data-tab="mine"><strong>${completed}</strong><span>已完成</span></button>
+      </div>
+    </section>
+    <section class="link-grid">
+      <button data-tab="intro"><strong>项目介绍</strong><span>了解祈福项目</span></button>
+      <button data-tab="mine"><strong>查看相册</strong><span>已完成祈福回顾</span></button>
+    </section>
+    <section class="panel section intro-projects"><h2>祈福项目</h2><div class="card-list">${state.rituals.map(ritualCard).join('')}</div></section>`;
 }
 
 function ritualCard(r) {
@@ -441,3 +478,5 @@ async function updateBlessing(id, action) {
 }
 
 bootstrap();
+
+
