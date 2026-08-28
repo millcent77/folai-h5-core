@@ -20,7 +20,6 @@ const state = {
   takers: demoTakers,
   blessings: JSON.parse(localStorage.getItem(storageKeys.blessings) || '[]'),
   profile: JSON.parse(localStorage.getItem(storageKeys.profile) || '{}'),
-  selectedDetail: null,
   releaseItems: [{ ritual_id: 1, quantity: 1 }],
   adminToken: localStorage.getItem(storageKeys.adminToken) || ''
 };
@@ -71,12 +70,11 @@ function shell(content) {
         <div class="topbar-inner">
           <div class="brand">
             <div class="brand-mark">佛</div>
-            <div><h1 class="brand-title">佛来运转</h1><p class="brand-subtitle">低成本 H5 核心闭环</p></div>
+            <div><h1 class="brand-title">佛来运转</h1><p class="brand-subtitle">用心祈愿 福佑随行</p></div>
           </div>
           <nav class="tabs top-tabs">
             ${tabButton('intro', '项目介绍')}
             ${tabButton('release', '发布需求')}
-            ${tabButton('query', '需求查询')}
             ${tabButton('mine', '我的需求')}
             ${tabButton('worker', '接单员任务台')}
             ${tabButton('admin', '后台管理')}
@@ -87,14 +85,15 @@ function shell(content) {
       <nav class="bottom-nav">
         ${bottomButton('intro', '首页')}
         ${bottomButton('release', '发布')}
-        ${bottomButton('query', '查询')}
         ${bottomButton('mine', '我的')}
+        ${bottomButton('worker', '任务')}
       </nav>
       <footer class="footer">第一版只保留祈福核心流程，旧商城、钱包、分销、营销功能不进入本项目。</footer>
     </div>`;
 }
 
 function profileBar() {
+  if (state.tab === 'intro') return '';
   const label = state.profile.phone ? `${escapeHtml(state.profile.nickname || '用户')} · ${escapeHtml(state.profile.phone)}` : '未登记手机';
   return `<div class="profile-bar"><span>${label}</span><button class="secondary small" data-tab="mine">设置</button></div>`;
 }
@@ -115,35 +114,32 @@ function renderIntro() {
       <div class="hero-copy">
         <h1>佛来运转</h1>
         <p class="hero-kicker">用心祈愿&nbsp;&nbsp;福佑随行</p>
-        <p>寺院为您虔心祈福，愿所求皆所愿，所行化坦途。</p>
+        <p>在寺院为您虔心祈福<br>愿所求皆所愿，所行化坦途</p>
       </div>
       <div class="hero-photo" aria-hidden="true"></div>
     </section>
-    <section class="primary-entry" data-tab="release" role="button" tabindex="0">
-      <div>
-        <strong>发布需求</strong>
-        <span>填写祈福信息，提交寺院祈福</span>
-      </div>
-      <span class="entry-arrow">&rsaquo;</span>
+    <section class="home-card home-card-primary">
+      <button class="primary-entry" data-tab="release" type="button">
+        <span class="entry-icon">合掌</span>
+        <span class="entry-copy"><strong>发布需求</strong><em>填写祈愿信息，提交寺院祈福</em></span>
+        <span class="entry-arrow">&rsaquo;</span>
+      </button>
+      <button class="quick-row" data-tab="mine" type="button"><span class="quick-icon">手机</span><span class="quick-title">手机登记</span><span class="quick-sub">用于接收进度通知</span><span>&rsaquo;</span></button>
+      <button class="quick-row" data-tab="release" type="button"><span class="quick-icon">渠道</span><span class="quick-title">渠道码</span><span class="quick-sub">${escapeHtml(state.profile.channel_code || '请输入接单员渠道码')}</span><span>&rsaquo;</span></button>
     </section>
-    <section class="quick-panel">
-      <button class="quick-row" data-tab="mine"><span class="quick-title">手机登记</span><span class="quick-sub">用于接收进度与查看相册</span><span>&rsaquo;</span></button>
-      <button class="quick-row" data-tab="release"><span class="quick-title">渠道码</span><span class="quick-sub">${escapeHtml(state.profile.channel_code || '请输入接单员渠道码')}</span><span>&rsaquo;</span></button>
-    </section>
-    <section class="quick-panel">
-      <button class="quick-row large" data-tab="query"><span class="quick-title">需求查询</span><span class="quick-sub">输入编号和查询码，查看进度</span><span>&rsaquo;</span></button>
-      <button class="quick-row large" data-tab="mine"><span class="quick-title">我的需求</span><span class="quick-sub">查看我发布的所有祈福记录</span><span>&rsaquo;</span></button>
+    <section class="home-card">
+      <button class="quick-row large" data-tab="mine" type="button"><span class="quick-icon search">查询</span><span class="quick-title">我的需求 / 进度查询</span><span class="quick-sub">输入编号查询进度，也可查看所有祈福记录</span><span>&rsaquo;</span></button>
     </section>
     <section class="status-strip">
       <p>愿您的祈愿，早日圆满</p>
       <div class="status-pair">
-        <button data-tab="mine"><strong>${pending}</strong><span>待完成</span></button>
-        <button data-tab="mine"><strong>${completed}</strong><span>已完成</span></button>
+        <button data-tab="mine" type="button"><strong>${pending}</strong><span>待完成</span></button>
+        <button data-tab="mine" type="button"><strong>${completed}</strong><span>已完成</span></button>
       </div>
     </section>
     <section class="link-grid">
-      <button data-tab="intro"><strong>项目介绍</strong><span>了解祈福项目</span></button>
-      <button data-tab="mine"><strong>查看相册</strong><span>已完成祈福回顾</span></button>
+      <button data-tab="intro" type="button"><strong>项目介绍</strong><span>了解祈福项目</span></button>
+      <button data-tab="mine" type="button"><strong>查看相册</strong><span>已完成祈福回顾</span></button>
     </section>
     <section class="panel section intro-projects"><h2>祈福项目</h2><div class="card-list">${state.rituals.map(ritualCard).join('')}</div></section>`;
 }
@@ -156,7 +152,7 @@ function ritualCard(r) {
 function renderRelease() {
   const phone = state.profile.phone || '';
   return `
-    <section class="panel">
+    <section class="panel page-panel">
       <h2>发布祈福需求</h2>
       <div class="notice">渠道码请填写接单员提供的编号，例如 T001。填写错误时，接单员可能看不到这条需求。</div>
       <form id="releaseForm" class="form-grid section-sm">
@@ -185,17 +181,7 @@ function releaseItemsHtml() {
 }
 
 function renderQuery() {
-  return `
-    <section class="panel">
-      <h2>需求查询</h2>
-      <p class="meta">为保护姓名、生日、照片和视频，H5 版使用“需求编号 + 查询码”查看详情。提交成功后请保存这两个号码。</p>
-      <form id="queryForm" class="form-grid">
-        ${input('task_id', '需求编号', 'text', true)}
-        ${input('access_code', '查询码', 'text', true)}
-        <div class="field full"><button class="primary" type="submit">查询</button></div>
-      </form>
-      <div id="queryResult" class="result"></div>
-    </section>`;
+  return renderMine();
 }
 
 function renderMine() {
@@ -203,31 +189,41 @@ function renderMine() {
   const pending = related.filter((b) => b.status !== 'COMPLETED' && b.status !== 'CANCELLED');
   const completed = related.filter((b) => b.status === 'COMPLETED');
   return `
-    <section class="panel">
-      <h2>我的设置</h2>
+    <section class="panel mine-lookup">
+      <h2>我的需求 / 进度查询</h2>
+      <p class="meta">提交后可用需求编号和查询码查看进度；手机登记后，本机发布记录会自动归到这里。</p>
+      <form id="queryForm" class="form-grid compact-form">
+        ${input('task_id', '需求编号', 'text', false)}
+        ${input('access_code', '查询码', 'text', false)}
+        <div class="field full"><button class="primary" type="submit">查询进度</button></div>
+      </form>
+      <div id="queryResult" class="result"></div>
+    </section>
+    <section class="panel section">
+      <h2>手机登记</h2>
       <form id="profileForm" class="form-grid">
         ${input('profile_phone', '手机号', 'tel', true, state.profile.phone || '')}
         ${input('profile_nickname', '昵称', 'text', false, state.profile.nickname || '')}
         ${input('profile_channel', '常用渠道码', 'text', false, state.profile.channel_code || '')}
         ${input('profile_password', '本机密码备注', 'password', false, state.profile.password || '')}
-        <div class="field full"><button class="primary" type="submit">保存设置</button></div>
+        <div class="field full"><button class="secondary" type="submit">保存登记信息</button></div>
       </form>
       <div id="profileResult" class="result"></div>
     </section>
     <section class="split section">
       <div class="panel"><h2>待完成</h2><div class="card-list">${pending.map(cardForBlessing).join('') || '<p class="meta">暂无待完成需求。</p>'}</div></div>
-      <div class="panel"><h2>已完成</h2><div class="card-list">${completed.map(cardForBlessing).join('') || '<p class="meta">暂无已完成需求。</p>'}</div></div>
+      <div class="panel"><h2>已完成 / 相册</h2><div class="card-list">${completed.map(cardForBlessing).join('') || '<p class="meta">暂无已完成需求。</p>'}</div></div>
     </section>`;
 }
 
 function renderWorker() {
   const rows = state.blessings.filter((b) => b.status !== 'COMPLETED' && b.status !== 'CANCELLED').map(cardForWorker).join('') || '<p class="meta">暂无待办任务。</p>';
-  return `<section class="panel"><h2>接单员任务台</h2><div class="notice">部署后，确认接单、上传照片视频、流转和完成都由管理员 Token 保护。未部署时可本机演示状态变化。</div><div class="card-list section-sm">${rows}</div></section>`;
+  return `<section class="panel page-panel"><h2>接单员任务台</h2><div class="notice">部署后，确认接单、上传照片视频、流转和完成都由管理员 Token 保护。未部署时可本机演示状态变化。</div><div class="card-list section-sm">${rows}</div><div class="actions"><button class="secondary" data-tab="admin">后台管理</button></div></section>`;
 }
 
 function renderAdmin() {
   return `
-    <section class="panel">
+    <section class="panel page-panel">
       <h2>后台管理</h2>
       <div class="form-grid">
         ${input('adminToken', '管理员 Token', 'password', false, state.adminToken)}
@@ -253,7 +249,7 @@ function cardForBlessing(b) {
 }
 
 function cardForWorker(b) {
-  return `<article class="ritual-card"><strong>${escapeHtml(b.task_id)}</strong><p>${escapeHtml(b.real_name)} · 渠道码 ${escapeHtml(b.channel_code || '-')}</p><label class="field">拍照/视频上传<input type="file" accept="image/*,video/*" capture="environment" multiple data-files="${b.task_id}"></label><div class="actions"><button class="secondary" data-action="accept" data-id="${b.id}">确认接单</button><button class="secondary" data-action="assign" data-id="${b.id}">流转</button><button class="primary" data-action="complete" data-id="${b.id}">完成</button></div></article>`;
+  return `<article class="ritual-card"><strong>${b.task_id}</strong><p>${escapeHtml(b.real_name)} · 渠道码 ${escapeHtml(b.channel_code || '-')}</p><label class="field">拍照/视频上传<input type="file" accept="image/*,video/*" capture="environment" multiple data-files="${b.task_id}"></label><div class="actions"><button class="secondary" data-action="accept" data-id="${b.id}">确认接单</button><button class="secondary" data-action="assign" data-id="${b.id}">流转</button><button class="primary" data-action="complete" data-id="${b.id}">完成</button></div></article>`;
 }
 
 function adminRow(b) {
@@ -282,7 +278,7 @@ function escapeHtml(value = '') {
 }
 
 function render() {
-  const views = { intro: renderIntro, release: renderRelease, query: renderQuery, mine: renderMine, worker: renderWorker, admin: renderAdmin };
+  const views = { intro: renderIntro, release: renderRelease, query: renderMine, mine: renderMine, worker: renderWorker, admin: renderAdmin };
   document.getElementById('app').innerHTML = shell(views[state.tab]());
   bindEvents();
 }
@@ -394,6 +390,10 @@ async function submitQuery(event) {
   const form = new FormData(event.target);
   const taskId = String(form.get('task_id') || '').trim();
   const accessCode = String(form.get('access_code') || '').trim();
+  if (!taskId || !accessCode) {
+    document.getElementById('queryResult').innerHTML = '<div class="notice">请输入需求编号和查询码。</div>';
+    return;
+  }
   try {
     const listData = await api(`/api/blessings?task_id=${encodeURIComponent(taskId)}&access_code=${encodeURIComponent(accessCode)}`);
     const first = listData.list?.[0];
@@ -478,5 +478,3 @@ async function updateBlessing(id, action) {
 }
 
 bootstrap();
-
-
