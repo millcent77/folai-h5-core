@@ -1,0 +1,1 @@
+{"scripts":{"build":"node --check src/app.js","check":"node --check src/app.js"},"dependencies":{},"devDependencies":{}}
