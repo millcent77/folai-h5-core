@@ -107,8 +107,9 @@ function shell(content) {
 
 function profileBar() {
   if (state.tab === 'intro') return '';
-  const label = state.profile.phone ? `${escapeHtml(state.profile.nickname || '用户')} · ${escapeHtml(state.profile.phone)}` : '未登记手机';
-  return `<div class="profile-bar"><span>${label}</span><button class="secondary small" data-tab="mine">设置</button></div>`;
+  const label = state.profile.phone ? `${escapeHtml(state.profile.nickname || '用户')} · ${escapeHtml(state.profile.phone)}` : '未登录手机';
+  const action = state.profile.phone ? '<button class="secondary small" id="logoutProfile">退出</button>' : '<button class="secondary small" data-tab="mine">登录</button>';
+  return `<div class="profile-bar"><span>${label}</span>${action}</div>`;
 }
 
 function tabButton(id, label) {
@@ -210,7 +211,7 @@ function renderQuery() {
 }
 
 function renderMine() {
-  const related = state.profile.phone ? state.blessings.filter((b) => b.mobile === state.profile.phone) : state.blessings;
+  const related = state.profile.phone ? state.blessings.filter((b) => b.mobile === state.profile.phone) : [];
   const pending = related.filter((b) => b.status !== 'COMPLETED' && b.status !== 'CANCELLED');
   const completed = related.filter((b) => b.status === 'COMPLETED');
   return `
@@ -225,15 +226,15 @@ function renderMine() {
       <div id="queryResult" class="result"></div>
     </section>
     <section class="panel section">
-      <h2>手机登记</h2>
+      <h2>手机登录</h2>
       <form id="profileForm" class="form-grid">
         ${input('profile_phone', '手机号', 'tel', true, state.profile.phone || '')}
         ${input('profile_nickname', '昵称', 'text', false, state.profile.nickname || '')}
         ${input('profile_channel', '常用渠道码', 'text', false, state.profile.channel_code || '')}
         ${input('profile_password', '本机密码备注', 'password', false, state.profile.password || '')}
-        <div class="field full"><button class="secondary" type="submit">保存登记信息</button></div>
+        <div class="field full profile-actions"><button class="secondary" type="submit">登录 / 保存</button>${state.profile.phone ? '<button class="danger" type="button" id="logoutProfileInForm">退出登录</button>' : ''}</div>
       </form>
-      <div id="profileResult" class="result"></div>
+      <div id="profileResult" class="result"></div><p class="meta">退出登录不会删除本机订单；用原手机号重新登录后，会再次显示该手机号下的订单。换手机查看请使用需求编号和查询码。</p>
     </section>
     <section class="split section">
       <div class="panel"><h2>待完成</h2><div class="card-list">${pending.map(cardForBlessing).join('') || '<p class="meta">暂无待完成需求。</p>'}</div></div>
@@ -394,6 +395,8 @@ function render() {
 function bindEvents() {
   document.querySelectorAll('[data-tab]').forEach((button) => button.addEventListener('click', () => { state.tab = button.dataset.tab; render(); }));
   document.getElementById('profileForm')?.addEventListener('submit', submitProfile);
+  document.getElementById('logoutProfile')?.addEventListener('click', logoutProfile);
+  document.getElementById('logoutProfileInForm')?.addEventListener('click', logoutProfile);
   document.getElementById('releaseForm')?.addEventListener('submit', submitRelease);
   document.getElementById('queryForm')?.addEventListener('submit', submitQuery);
   document.getElementById('addItem')?.addEventListener('click', addReleaseItem);
@@ -417,8 +420,17 @@ function submitProfile(event) {
     password: String(form.get('profile_password') || '').trim()
   };
   saveProfile();
-  document.getElementById('profileResult').innerHTML = '<div class="notice">已保存到本机浏览器。正式部署如需短信验证码，可在后续版本接入。</div>';
+  document.getElementById('profileResult').innerHTML = '<div class="notice">已登录并保存到本机浏览器。现在会显示此手机号下的本机订单。</div>';
   render();
+}
+
+function logoutProfile() {
+  state.profile = {};
+  localStorage.removeItem(storageKeys.profile);
+  state.tab = 'mine';
+  render();
+  const result = document.getElementById('profileResult');
+  if (result) result.innerHTML = '<div class="notice">已退出登录。本机订单未删除，重新输入原手机号登录即可查看。</div>';
 }
 
 function syncReleaseItems(form) {

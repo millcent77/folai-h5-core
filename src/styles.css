@@ -433,3 +433,14 @@ button:disabled {
   color: var(--teal);
 }
 
+
+.profile-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.profile-actions .danger,
+.profile-actions .secondary {
+  width: 100%;
+}
