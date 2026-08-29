@@ -262,15 +262,16 @@ function cardForBlessing(b) {
 
 function cardForWorker(b) {
   const itemText = (b.items || []).map((i) => `${i.ritual_name || ritualName(i.ritual_id)} x ${i.quantity}`).join('，') || b.ritual_name || '祈福项目';
-  return `<article class="ritual-card worker-card">
-    <div class="card-head"><strong>${escapeHtml(b.task_id)}</strong><span class="status ${b.status}">${statusText[b.status] || b.status}</span></div>
-    <p>${escapeHtml(b.real_name)} · ${escapeHtml(b.sex || '-')} · ${escapeHtml(b.age || '-')}岁 · ${escapeHtml(itemText)}</p>
-    <p class="meta">生日：${escapeHtml(b.birthday || '-')} · 属相：${escapeHtml(b.zodiac || '-')} · 渠道码：${escapeHtml(b.channel_code || '-')}</p>
-    <p class="meta">当前接单员：${escapeHtml(takerName(b.current_taker_id) || '未指定')}</p>
-    <div class="actions"><button class="secondary" data-detail="${b.task_id}">订单详情</button><button class="secondary" data-action="accept" data-id="${b.id}">确认接单</button></div>
+  const accepted = b.status === 'ACCEPTED';
+  return `<article class="ritual-card worker-card compact-worker">
+    <div class="worker-top"><strong>${escapeHtml(b.real_name || '-')}</strong><span class="status ${b.status}">${statusText[b.status] || b.status}</span></div>
+    <div class="worker-info"><span>性别 ${escapeHtml(b.sex || '-')}</span><span>出生 ${escapeHtml(b.birthday || '-')}</span><span>属相 ${escapeHtml(b.zodiac || '-')}</span><span>年龄 ${escapeHtml(b.age || '-')}</span></div>
+    <div class="worker-ritual">${escapeHtml(itemText)}</div>
+    <div class="worker-meta"><span>${escapeHtml(b.task_id)}</span><span>渠道码 ${escapeHtml(b.channel_code || '-')}</span></div>
+    <div class="actions"><button class="secondary" data-detail="${b.task_id}">详情</button><button class="secondary" data-action="accept" data-id="${b.id}" ${accepted ? 'disabled' : ''}>${accepted ? '已接单' : '确认接单'}</button></div>
+    ${accepted ? `<label class="field full upload-field">上传照片/视频<input type="file" accept="image/*,video/*,.mp4,.mov,.webm" multiple data-files="${b.task_id}"><span class="meta">选择后会先压缩到 1MB 以内，再上传或加入预览。</span></label>` : '<div class="notice slim">确认接单后可上传照片/视频。</div>'}
     <label class="field full">流转给后续接单员<select data-flow-target="${b.id}">${state.takers.map((t) => `<option value="${t.id}" ${String(b.current_taker_id) === String(t.id) ? 'selected' : ''}>${escapeHtml(t.nickname || t.taker_code || t.id)}（${escapeHtml(t.taker_code || '-') }）</option>`).join('')}</select></label>
     <div class="actions"><button class="secondary" data-action="assign" data-id="${b.id}">确认流转</button><button class="primary" data-action="complete" data-id="${b.id}">完成</button></div>
-    <label class="field full">拍照/视频上传<input type="file" accept="image/*,video/*" capture="environment" multiple data-files="${b.task_id}"></label>
     <div class="upload-preview">${mediaPreviewHtml(b.media || [], b)}</div>
   </article>`;
 }
@@ -303,10 +304,10 @@ function mediaPreviewHtml(media, context = {}) {
       return `<div class="album-item file-item"><strong>${escapeHtml(name)}</strong><span class="meta">未上传到云端，请在接单员任务台重新上传。</span></div>`;
     }
     if (type.startsWith('video/')) {
-      return `<div class="album-item"><video src="${escapeAttr(src)}" controls playsinline preload="metadata"></video><span>${escapeHtml(name)}</span></div>`;
+      return `<div class="album-item"><video src="${escapeAttr(src)}" controls playsinline preload="metadata"></video><span>${escapeHtml(name)}</span><button class="secondary small open-media" type="button" data-open-media="${escapeAttr(src)}" data-media-name="${escapeAttr(name)}" data-media-type="${escapeAttr(type)}">打开/保存</button></div>`;
     }
     if (type.startsWith('image/') || src.startsWith('data:image') || src.match(/\.(png|jpe?g|webp|gif)(\?|$)/i)) {
-      return `<button class="album-item album-button" type="button" data-open-media="${escapeAttr(src)}" data-media-name="${escapeAttr(name)}"><img src="${escapeAttr(src)}" alt="${escapeAttr(name)}" loading="lazy"><span>${escapeHtml(name)}</span></button>`;
+      return `<button class="album-item album-button" type="button" data-open-media="${escapeAttr(src)}" data-media-name="${escapeAttr(name)}" data-media-type="${escapeAttr(type)}"><img src="${escapeAttr(src)}" alt="${escapeAttr(name)}" loading="lazy"><span>${escapeHtml(name)}</span></button>`;
     }
     return `<div class="album-item file-item"><strong>${escapeHtml(name)}</strong><span class="meta">${escapeHtml(type || '文件')} #${index + 1}</span></div>`;
   }).join('');
@@ -376,7 +377,7 @@ function bindEvents() {
   document.getElementById('loadAdmin')?.addEventListener('click', loadAdmin);
   document.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => updateBlessing(button.dataset.id, button.dataset.action)));
   document.querySelectorAll('[data-files]').forEach((input) => input.addEventListener('change', () => attachMedia(input.dataset.files, input.files)));
-  document.querySelectorAll('[data-open-media]').forEach((button) => button.addEventListener('click', () => showMediaPreview(button.dataset.openMedia, button.dataset.mediaName)));
+  bindMediaOpen();
 }
 
 function submitProfile(event) {
@@ -487,6 +488,7 @@ async function submitQuery(event) {
     const local = state.blessings.find((b) => b.task_id === taskId && b.access_code === accessCode);
     document.getElementById('queryResult').innerHTML = local ? renderDetail(local) + renderAlbum(local) : `<div class="notice">${escapeHtml(err.message)}</div>`;
   }
+  bindMediaOpen();
 }
 
 function showLocalDetail(taskId) {
@@ -495,6 +497,7 @@ function showLocalDetail(taskId) {
   const mount = document.querySelector('main');
   mount.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" data-close-modal><div class="modal">${renderDetail(item)}<button class="primary" data-close-modal>关闭</button></div></div>`);
   bindModalClose();
+  bindMediaOpen();
 }
 
 function showLocalAlbum(taskId) {
@@ -503,27 +506,50 @@ function showLocalAlbum(taskId) {
   const mount = document.querySelector('main');
   mount.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" data-close-modal><div class="modal">${renderAlbum(item)}<button class="primary" data-close-modal>关闭</button></div></div>`);
   bindModalClose();
+  bindMediaOpen();
 }
 
-function showMediaPreview(src, name) {
+function showMediaPreview(src, name, type = '') {
   if (!src) return;
+  const safeName = name || '现场照片';
+  const preview = type.startsWith('video/') ? `<video src="${escapeAttr(src)}" controls playsinline></video>` : `<img src="${escapeAttr(src)}" alt="${escapeAttr(safeName)}">`;
   const mount = document.querySelector('main');
-  mount.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" data-close-modal><div class="modal media-modal"><h3>${escapeHtml(name || '照片预览')}</h3><img src="${escapeAttr(src)}" alt="${escapeAttr(name || '照片预览')}"><button class="primary" data-close-modal>关闭</button></div></div>`);
+  mount.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" data-close-modal><div class="modal media-modal"><h3>${escapeHtml(safeName)}</h3>${preview}<div class="actions media-actions"><a class="secondary download-link" href="${escapeAttr(src)}" download="${escapeAttr(safeName)}" target="_blank" rel="noopener">下载/保存</a><button class="primary" data-close-modal>关闭</button></div><p class="meta">手机浏览器如未直接下载，可长按图片或打开后保存。</p></div></div>`);
   bindModalClose();
 }
 
+function bindMediaOpen() {
+  document.querySelectorAll('[data-open-media]').forEach((button) => {
+    if (button.dataset.boundMedia) return;
+    button.dataset.boundMedia = '1';
+    button.addEventListener('click', () => showMediaPreview(button.dataset.openMedia, button.dataset.mediaName, button.dataset.mediaType || ''));
+  });
+}
+
 function bindModalClose() {
-  document.querySelectorAll('[data-close-modal]').forEach((node) => node.addEventListener('click', (event) => {
-    if (event.target.dataset.closeModal !== undefined) event.target.closest('.modal-backdrop')?.remove();
-  }));
+  document.querySelectorAll('[data-close-modal]').forEach((node) => {
+    if (node.dataset.boundClose) return;
+    node.dataset.boundClose = '1';
+    node.addEventListener('click', (event) => {
+      if (event.target.dataset.closeModal !== undefined) event.target.closest('.modal-backdrop')?.remove();
+    });
+  });
 }
 
 async function attachMedia(taskId, files) {
   const item = state.blessings.find((b) => b.task_id === taskId);
   if (!item || !files?.length) return;
-  const fileList = Array.from(files);
+  if (item.status !== 'ACCEPTED') {
+    setWorkerMessage('请先确认接单，再上传照片/视频。');
+    return;
+  }
+  const sourceFiles = Array.from(files);
   const willUploadToCloud = Boolean(state.adminToken && item.id);
-  setWorkerMessage(willUploadToCloud ? `正在上传 ${fileList.length} 个文件到云端...` : `正在生成 ${fileList.length} 个本机临时预览...`);
+  setWorkerMessage(`正在压缩 ${sourceFiles.length} 个文件，请稍候...`);
+  const processed = await Promise.all(sourceFiles.map(prepareUploadFile));
+  const fileList = processed.map((entry) => entry.file);
+  const warnings = processed.filter((entry) => entry.warning).map((entry) => entry.warning);
+  setWorkerMessage(willUploadToCloud ? `正在上传 ${fileList.length} 个压缩文件到云端...` : `正在生成 ${fileList.length} 个本机临时预览...`);
 
   let uploaded = [];
   if (willUploadToCloud) {
@@ -552,8 +578,108 @@ async function attachMedia(taskId, files) {
   item.records = item.records || [];
   item.records.push({ action: 'UPLOADED', note: `上传 ${fileList.length} 个照片/视频`, created_at: new Date().toLocaleString() });
   saveDemo();
-  setWorkerMessage(uploaded.length ? `已上传 ${uploaded.length} 个文件到云端，可在订单详情和相册中预览。` : `已加入 ${fileList.length} 个本机临时预览；未上传到 R2，刷新或换手机后可能无法查看。`);
+  const suffix = warnings.length ? ` ${warnings.join(' ')}` : '';
+  setWorkerMessage((uploaded.length ? `已上传 ${uploaded.length} 个文件到云端，可在订单详情和相册中预览。` : `已加入 ${fileList.length} 个本机临时预览；未上传到 R2，刷新或换手机后可能无法查看。`) + suffix);
   render();
+}
+
+async function prepareUploadFile(file) {
+  if ((file.type || '').startsWith('image/')) return compressImage(file);
+  if ((file.type || '').startsWith('video/')) return compressVideo(file);
+  return { file, warning: file.size > 1024 * 1024 ? `${file.name} 不是图片或视频，未压缩。` : '' };
+}
+
+function compressImage(file) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = async () => {
+      URL.revokeObjectURL(url);
+      let width = img.naturalWidth || img.width;
+      let height = img.naturalHeight || img.height;
+      let quality = 0.82;
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      let blob = null;
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const scale = Math.min(1, 1400 / Math.max(width, height));
+        canvas.width = Math.max(1, Math.round(width * scale));
+        canvas.height = Math.max(1, Math.round(height * scale));
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        blob = await canvasToBlob(canvas, 'image/jpeg', quality);
+        if (blob && blob.size <= 1024 * 1024) break;
+        width *= 0.82;
+        height *= 0.82;
+        quality = Math.max(0.45, quality - 0.08);
+      }
+      if (!blob) return resolve({ file, warning: `${file.name} 压缩失败，使用原文件。` });
+      const compressed = new File([blob], renameFile(file.name, '.jpg'), { type: 'image/jpeg' });
+      resolve({ file: compressed, warning: compressed.size > 1024 * 1024 ? `${file.name} 仍超过 1MB。` : '' });
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      resolve({ file, warning: `${file.name} 压缩失败，使用原文件。` });
+    };
+    img.src = url;
+  });
+}
+
+function compressVideo(file) {
+  if (file.size <= 1024 * 1024) return Promise.resolve({ file, warning: '' });
+  if (!window.MediaRecorder) return Promise.resolve({ file, warning: `${file.name} 当前浏览器不支持视频压缩，请选择 1MB 以内视频。` });
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    const url = URL.createObjectURL(file);
+    const chunks = [];
+    let finished = false;
+    const finish = (result) => {
+      if (finished) return;
+      finished = true;
+      URL.revokeObjectURL(url);
+      resolve(result);
+    };
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'metadata';
+    video.onloadedmetadata = () => {
+      const canvas = document.createElement('canvas');
+      const maxSide = 360;
+      const scale = Math.min(1, maxSide / Math.max(video.videoWidth || maxSide, video.videoHeight || maxSide));
+      canvas.width = Math.max(1, Math.round((video.videoWidth || maxSide) * scale));
+      canvas.height = Math.max(1, Math.round((video.videoHeight || maxSide) * scale));
+      const ctx = canvas.getContext('2d');
+      const stream = canvas.captureStream ? canvas.captureStream(12) : null;
+      if (!stream) return finish({ file, warning: `${file.name} 当前浏览器不支持视频压缩，请选择 1MB 以内视频。` });
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp8') ? 'video/webm;codecs=vp8' : 'video/webm';
+      const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 180000 });
+      recorder.ondataavailable = (event) => { if (event.data?.size) chunks.push(event.data); };
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        if (!blob.size) return finish({ file, warning: `${file.name} 视频压缩失败，使用原文件。` });
+        const compressed = new File([blob], renameFile(file.name, '.webm'), { type: 'video/webm' });
+        finish({ file: compressed, warning: compressed.size > 1024 * 1024 ? `${file.name} 已压缩但仍超过 1MB。` : '' });
+      };
+      const draw = () => {
+        if (video.paused || video.ended) return;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        requestAnimationFrame(draw);
+      };
+      recorder.start(250);
+      video.play().then(() => draw()).catch(() => finish({ file, warning: `${file.name} 视频压缩失败，使用原文件。` }));
+      video.onended = () => recorder.state !== 'inactive' && recorder.stop();
+      setTimeout(() => recorder.state !== 'inactive' && recorder.stop(), Math.max(3000, (video.duration || 5) * 1000 + 1000));
+    };
+    video.onerror = () => finish({ file, warning: `${file.name} 视频压缩失败，使用原文件。` });
+    video.src = url;
+  });
+}
+
+function canvasToBlob(canvas, type, quality) {
+  return new Promise((resolve) => canvas.toBlob(resolve, type, quality));
+}
+
+function renameFile(name, ext) {
+  return `${String(name || 'media').replace(/\.[^.]+$/, '')}${ext}`;
 }
 
 function fileToMedia(file) {
