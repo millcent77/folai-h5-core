@@ -178,4 +178,25 @@ textarea { min-height: 96px; resize: vertical; }
   .album-grid, .upload-preview { grid-template-columns: 1fr; }
 }
 
+.album-button {
+  width: 100%;
+  text-align: left;
+  appearance: none;
+}
 
+.album-button img {
+  cursor: zoom-in;
+}
+
+.media-modal {
+  display: grid;
+  gap: 12px;
+}
+
+.media-modal img {
+  width: 100%;
+  max-height: 72vh;
+  object-fit: contain;
+  border-radius: 12px;
+  background: #f3eadc;
+}

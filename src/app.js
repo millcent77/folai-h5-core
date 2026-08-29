@@ -35,7 +35,17 @@ const statusText = {
 };
 
 function saveDemo() {
-  localStorage.setItem(storageKeys.blessings, JSON.stringify(state.blessings));
+  try {
+    localStorage.setItem(storageKeys.blessings, JSON.stringify(state.blessings));
+  } catch (_) {
+    const compact = state.blessings.map((blessing) => ({
+      ...blessing,
+      media: (blessing.media || []).map(({ data_url, preview_url, ...media }) => media)
+    }));
+    try {
+      localStorage.setItem(storageKeys.blessings, JSON.stringify(compact));
+    } catch (_) {}
+  }
 }
 
 function saveProfile() {
@@ -220,7 +230,7 @@ function renderMine() {
 
 function renderWorker() {
   const rows = state.blessings.filter((b) => b.status !== 'COMPLETED' && b.status !== 'CANCELLED').map(cardForWorker).join('') || '<p class="meta">暂无待办任务。</p>';
-  return `<section class="panel page-panel"><h2>接单员任务台</h2><div class="notice">选择文件时可一次选择多张照片/多个视频；未配置后台 Token 时先走本机演示，配置后会上传到 R2。</div><div id="workerResult" class="result">${state.workerNotice ? `<div class="notice">${escapeHtml(state.workerNotice)}</div>` : ""}</div><div class="card-list section-sm">${rows}</div><div class="actions"><button class="secondary" data-tab="admin">后台管理</button></div></section>`;
+  return `<section class="panel page-panel"><h2>接单员任务台</h2><div class="notice">选择文件时可一次选择多张照片/多个视频；保存后台 Token 后会上传到 R2，未保存 Token 只做本机临时预览。</div><div id="workerResult" class="result">${state.workerNotice ? `<div class="notice">${escapeHtml(state.workerNotice)}</div>` : ""}</div><div class="card-list section-sm">${rows}</div><div class="actions"><button class="secondary" data-tab="admin">后台管理</button></div></section>`;
 }
 
 function renderAdmin() {
@@ -285,28 +295,48 @@ function renderAlbum(b) {
 
 function mediaPreviewHtml(media, context = {}) {
   if (!media.length) return '<p class="meta">暂无照片或视频。</p>';
-  return media.map((m) => {
+  return media.map((m, index) => {
     const name = m.name || m.filename || '现场文件';
-    const type = m.type || m.content_type || '';
+    const type = m.type || m.content_type || guessContentType(name, m.url || m.r2_key || m.key || '');
     const src = mediaUrl(m, context);
+    if (!src) {
+      return `<div class="album-item file-item"><strong>${escapeHtml(name)}</strong><span class="meta">未上传到云端，请在接单员任务台重新上传。</span></div>`;
+    }
     if (type.startsWith('video/')) {
-      return `<div class="album-item"><video src="${escapeAttr(src)}" controls playsinline></video><span>${escapeHtml(name)}</span></div>`;
+      return `<div class="album-item"><video src="${escapeAttr(src)}" controls playsinline preload="metadata"></video><span>${escapeHtml(name)}</span></div>`;
     }
     if (type.startsWith('image/') || src.startsWith('data:image') || src.match(/\.(png|jpe?g|webp|gif)(\?|$)/i)) {
-      return `<div class="album-item"><img src="${escapeAttr(src)}" alt="${escapeAttr(name)}"><span>${escapeHtml(name)}</span></div>`;
+      return `<button class="album-item album-button" type="button" data-open-media="${escapeAttr(src)}" data-media-name="${escapeAttr(name)}"><img src="${escapeAttr(src)}" alt="${escapeAttr(name)}" loading="lazy"><span>${escapeHtml(name)}</span></button>`;
     }
-    return `<div class="album-item file-item"><strong>${escapeHtml(name)}</strong><span class="meta">${escapeHtml(type || '文件')}</span></div>`;
+    return `<div class="album-item file-item"><strong>${escapeHtml(name)}</strong><span class="meta">${escapeHtml(type || '文件')} #${index + 1}</span></div>`;
   }).join('');
 }
 
 function mediaUrl(media, context = {}) {
-  const src = media.data_url || media.preview_url || media.url || '';
+  const key = media.r2_key || media.key || '';
+  let src = media.data_url || media.preview_url || media.url || '';
+  if (!src && key) src = `/api/media/${key.split('/').map(encodeURIComponent).join('/')}`;
+  if (src.startsWith('/api/media/')) src = normalizeMediaPath(src);
   if (!src || src.startsWith('data:') || src.startsWith('blob:')) return src;
+  if (!src.startsWith('/api/media/') && !src.startsWith('http://') && !src.startsWith('https://')) return '';
   if (context.task_id && context.access_code && src.startsWith('/api/media/')) {
     const separator = src.includes('?') ? '&' : '?';
     return `${src}${separator}task_id=${encodeURIComponent(context.task_id)}&access_code=${encodeURIComponent(context.access_code)}`;
   }
   return src;
+}
+
+function normalizeMediaPath(src) {
+  const [path, query = ''] = src.split('?');
+  const fixedPath = path.replace(/%2F/gi, '/');
+  return query ? `${fixedPath}?${query}` : fixedPath;
+}
+
+function guessContentType(name = '', path = '') {
+  const value = `${name} ${path}`.toLowerCase();
+  if (value.match(/\.(mp4|mov|webm|m4v)(\?|$|\s)/)) return 'video/mp4';
+  if (value.match(/\.(png|jpe?g|webp|gif)(\?|$|\s)/)) return 'image/jpeg';
+  return '';
 }
 
 function ritualName(id) {
@@ -346,6 +376,7 @@ function bindEvents() {
   document.getElementById('loadAdmin')?.addEventListener('click', loadAdmin);
   document.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => updateBlessing(button.dataset.id, button.dataset.action)));
   document.querySelectorAll('[data-files]').forEach((input) => input.addEventListener('change', () => attachMedia(input.dataset.files, input.files)));
+  document.querySelectorAll('[data-open-media]').forEach((button) => button.addEventListener('click', () => showMediaPreview(button.dataset.openMedia, button.dataset.mediaName)));
 }
 
 function submitProfile(event) {
@@ -474,6 +505,13 @@ function showLocalAlbum(taskId) {
   bindModalClose();
 }
 
+function showMediaPreview(src, name) {
+  if (!src) return;
+  const mount = document.querySelector('main');
+  mount.insertAdjacentHTML('beforeend', `<div class="modal-backdrop" data-close-modal><div class="modal media-modal"><h3>${escapeHtml(name || '照片预览')}</h3><img src="${escapeAttr(src)}" alt="${escapeAttr(name || '照片预览')}"><button class="primary" data-close-modal>关闭</button></div></div>`);
+  bindModalClose();
+}
+
 function bindModalClose() {
   document.querySelectorAll('[data-close-modal]').forEach((node) => node.addEventListener('click', (event) => {
     if (event.target.dataset.closeModal !== undefined) event.target.closest('.modal-backdrop')?.remove();
@@ -484,15 +522,18 @@ async function attachMedia(taskId, files) {
   const item = state.blessings.find((b) => b.task_id === taskId);
   if (!item || !files?.length) return;
   const fileList = Array.from(files);
-  setWorkerMessage(`正在处理 ${fileList.length} 个文件...`);
+  const willUploadToCloud = Boolean(state.adminToken && item.id);
+  setWorkerMessage(willUploadToCloud ? `正在上传 ${fileList.length} 个文件到云端...` : `正在生成 ${fileList.length} 个本机临时预览...`);
 
   let uploaded = [];
-  if (state.adminToken && item.id) {
+  if (willUploadToCloud) {
     try {
       const form = new FormData();
       fileList.forEach((file) => form.append('file', file));
       form.append('owner_type', 'scenario');
       form.append('owner_id', item.id);
+      form.append('task_id', item.task_id || '');
+      form.append('access_code', item.access_code || '');
       form.append('note', '接单员上传现场照片/视频');
       const data = await api('/api/upload', { method: 'POST', body: form });
       uploaded = (data.files || []).map((file) => ({ ...file, type: file.content_type, name: file.filename }));
@@ -511,7 +552,7 @@ async function attachMedia(taskId, files) {
   item.records = item.records || [];
   item.records.push({ action: 'UPLOADED', note: `上传 ${fileList.length} 个照片/视频`, created_at: new Date().toLocaleString() });
   saveDemo();
-  setWorkerMessage(`已上传/加入 ${fileList.length} 个文件，可在订单详情和相册中预览。`);
+  setWorkerMessage(uploaded.length ? `已上传 ${uploaded.length} 个文件到云端，可在订单详情和相册中预览。` : `已加入 ${fileList.length} 个本机临时预览；未上传到 R2，刷新或换手机后可能无法查看。`);
   render();
 }
 
@@ -551,7 +592,8 @@ async function loadAdmin() {
 
 async function updateBlessing(id, action) {
   const item = state.blessings.find((b) => String(b.id) === String(id));
-  const selectedTakerId = Number(document.querySelector(`[data-flow-target="${CSS.escape(String(id))}"]`)?.value || state.takers[0]?.id || 0) || null;
+  const flowSelect = Array.from(document.querySelectorAll('[data-flow-target]')).find((node) => String(node.dataset.flowTarget) === String(id));
+  const selectedTakerId = Number(flowSelect?.value || state.takers[0]?.id || 0) || null;
   try {
     await api(`/api/blessings/${id}`, { method: 'PATCH', body: JSON.stringify({ action, taker_id: selectedTakerId }) });
   } catch (_) {}
@@ -585,4 +627,3 @@ function addRecord(item, action, note) {
 }
 
 bootstrap();
-

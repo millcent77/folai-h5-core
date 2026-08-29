@@ -1,8 +1,18 @@
 import { error, requireAdmin } from '../_shared.js';
 
+function safeDecodePath(value = '') {
+  try {
+    return decodeURIComponent(value);
+  } catch (_) {
+    return value;
+  }
+}
+
+
 export async function onRequestGet({ request, params, env }) {
   if (!env.PRAYER_MEDIA) return error('R2 未绑定', 503);
-  const key = Array.isArray(params.path) ? params.path.join('/') : params.path;
+  const rawKey = Array.isArray(params.path) ? params.path.join('/') : params.path;
+  const key = safeDecodePath(rawKey || '');
   if (!key) return error('缺少媒体 key');
 
   const admin = requireAdmin(request, env);

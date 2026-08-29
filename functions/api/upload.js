@@ -24,8 +24,8 @@ export async function onRequestPost({ request, env }) {
     await env.PRAYER_MEDIA.put(key, file.stream(), {
       httpMetadata: { contentType: file.type || 'application/octet-stream' }
     });
-    const url = `/api/media/${encodeURIComponent(key)}`;
-    const record = { key, url, filename: file.name, content_type: file.type, size: file.size };
+    const url = `/api/media/${key.split('/').map(encodeURIComponent).join('/')}`;
+    const record = { key, r2_key: key, url, filename: file.name, content_type: file.type, size: file.size };
     uploaded.push(record);
     if ((file.type || '').startsWith('video/')) videoUrls.push(url); else imageUrls.push(url);
     if (env.DB) {
