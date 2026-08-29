@@ -444,3 +444,29 @@ button:disabled {
 .profile-actions .secondary {
   width: 100%;
 }
+
+.upload-choice {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.upload-choice .meta {
+  grid-column: 1 / -1;
+}
+
+.upload-choice .upload-field {
+  min-width: 0;
+}
+
+.upload-choice input {
+  min-height: 44px;
+  padding: 9px;
+  font-size: 12px;
+}
+
+@media (max-width: 360px) {
+  .upload-choice {
+    grid-template-columns: 1fr;
+  }
+}

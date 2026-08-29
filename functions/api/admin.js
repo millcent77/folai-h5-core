@@ -3,7 +3,7 @@ import { ok, error, readJson, requireAdmin } from './_shared.js';
 export async function onRequestGet({ request, env }) {
   if (!requireAdmin(request, env)) return error('后台需要管理员 Token', 401);
   if (!env.DB) return error('D1 未绑定', 503);
-  const blessings = await env.DB.prepare('SELECT * FROM blessings ORDER BY created_at DESC, id DESC LIMIT 200').all();
+  const blessings = await env.DB.prepare("SELECT b.*, (SELECT COUNT(*) FROM media_files m WHERE m.owner_id = b.id AND m.owner_type IN ('scenario','blessing')) AS media_count FROM blessings b ORDER BY b.created_at DESC, b.id DESC LIMIT 200").all();
   const rituals = await env.DB.prepare('SELECT * FROM rituals ORDER BY sort_order, id').all();
   const takers = await env.DB.prepare("SELECT id, role, phone, nickname, real_name, taker_code, status, created_at FROM users WHERE role = 'taker' ORDER BY id").all();
   return ok({ blessings: blessings.results || [], rituals: rituals.results || [], takers: takers.results || [] });

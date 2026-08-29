@@ -116,6 +116,18 @@ function tabButton(id, label) {
   return `<button class="tab ${state.tab === id ? 'active' : ''}" data-tab="${id}">${label}</button>`;
 }
 
+function setTab(tab) {
+  if (tab === 'release') ensureReleaseItems();
+  state.tab = tab;
+  render();
+}
+
+function ensureReleaseItems() {
+  if (!state.releaseItems.length || !state.releaseItems[0].ritual_id) {
+    state.releaseItems = [{ ritual_id: state.rituals[0]?.id || 1, quantity: 1 }];
+  }
+}
+
 function bottomButton(id, label) {
   return `<button class="nav-item ${state.tab === id ? 'active' : ''}" data-tab="${id}"><span>${label}</span></button>`;
 }
@@ -176,6 +188,7 @@ function ritualCard(r) {
 }
 
 function renderRelease() {
+  ensureReleaseItems();
   const phone = state.profile.phone || '';
   return `
     <section class="panel page-panel">
@@ -277,15 +290,16 @@ function cardForBlessing(b) {
 function cardForWorker(b) {
   const itemText = (b.items || []).map((i) => `${i.ritual_name || ritualName(i.ritual_id)} x ${i.quantity}`).join('，') || b.ritual_name || '祈福项目';
   const accepted = b.status === 'ACCEPTED';
+  const hasMedia = hasUploadedMedia(b);
   return `<article class="ritual-card worker-card compact-worker">
     <div class="worker-top"><strong>${escapeHtml(b.real_name || '-')}</strong><span class="status ${b.status}">${statusText[b.status] || b.status}</span></div>
     <div class="worker-info"><span>性别 ${escapeHtml(b.sex || '-')}</span><span>出生 ${escapeHtml(b.birthday || '-')}</span><span>属相 ${escapeHtml(b.zodiac || '-')}</span><span>年龄 ${escapeHtml(b.age || '-')}</span></div>
     <div class="worker-ritual">${escapeHtml(itemText)}</div>
     <div class="worker-meta"><span>${escapeHtml(b.task_id)}</span><span>渠道码 ${escapeHtml(b.channel_code || '-')}</span></div>
     <div class="actions"><button class="secondary" data-detail="${b.task_id}">详情</button><button class="secondary" data-action="accept" data-id="${b.id}" ${accepted ? 'disabled' : ''}>${accepted ? '已接单' : '确认接单'}</button></div>
-    ${accepted ? `<label class="field full upload-field">上传照片/视频<input type="file" accept="image/*,video/*,.mp4,.mov,.webm" multiple data-files="${b.task_id}"><span class="meta">选择后会先压缩到 1MB 以内，再上传或加入预览。</span></label>` : '<div class="notice slim">确认接单后可上传照片/视频。</div>'}
+    ${accepted ? `<div class="upload-choice"><label class="field upload-field">拍照/选图片<input type="file" accept="image/*" capture="environment" multiple data-files="${b.task_id}"></label><label class="field upload-field">拍视频/选视频<input type="file" accept="video/*,.mp4,.mov,.webm" capture="environment" multiple data-files="${b.task_id}"></label><span class="meta">选择后会先压缩到 1MB 以内，再上传或加入预览。</span></div>` : '<div class="notice slim">确认接单后可上传照片/视频。</div>'}
     <label class="field full">流转给后续接单员<select data-flow-target="${b.id}">${state.takers.map((t) => `<option value="${t.id}" ${String(b.current_taker_id) === String(t.id) ? 'selected' : ''}>${escapeHtml(t.nickname || t.taker_code || t.id)}（${escapeHtml(t.taker_code || '-') }）</option>`).join('')}</select></label>
-    <div class="actions"><button class="secondary" data-action="assign" data-id="${b.id}">确认流转</button><button class="primary" data-action="complete" data-id="${b.id}">完成</button></div>
+    <div class="actions"><button class="secondary" data-action="assign" data-id="${b.id}">确认流转</button><button class="primary" data-action="complete" data-id="${b.id}" ${hasMedia ? '' : 'disabled'}>${hasMedia ? '完成' : '上传后完成'}</button></div>
     <div class="upload-preview">${mediaPreviewHtml(b.media || [], b)}</div>
   </article>`;
 }
@@ -372,6 +386,10 @@ function ritualName(id) {
   return state.rituals.find((r) => String(r.id) === String(id))?.name || '祈福项目';
 }
 
+function hasUploadedMedia(blessing) {
+  return Number(blessing.media_count || 0) > 0 || (blessing.media || []).some((media) => Boolean(mediaUrl(media, blessing)));
+}
+
 function takerName(id) {
   if (!id) return '';
   const taker = state.takers.find((t) => String(t.id) === String(id));
@@ -393,7 +411,7 @@ function render() {
 }
 
 function bindEvents() {
-  document.querySelectorAll('[data-tab]').forEach((button) => button.addEventListener('click', () => { state.tab = button.dataset.tab; render(); }));
+  document.querySelectorAll('[data-tab]').forEach((button) => button.addEventListener('click', () => setTab(button.dataset.tab)));
   document.getElementById('profileForm')?.addEventListener('submit', submitProfile);
   document.getElementById('logoutProfile')?.addEventListener('click', logoutProfile);
   document.getElementById('logoutProfileInForm')?.addEventListener('click', logoutProfile);
@@ -434,10 +452,13 @@ function logoutProfile() {
 }
 
 function syncReleaseItems(form) {
-  state.releaseItems = state.releaseItems.map((_, index) => ({
+  const rows = Array.from(document.querySelectorAll('#releaseItems .item-row'));
+  const source = rows.length ? rows.map((_, index) => index) : state.releaseItems.map((_, index) => index);
+  state.releaseItems = source.map((index) => ({
     ritual_id: Number(form.get(`ritual_id_${index}`)),
     quantity: Math.max(1, Number(form.get(`quantity_${index}`) || 1))
-  }));
+  })).filter((item) => item.ritual_id);
+  ensureReleaseItems();
 }
 
 function addReleaseItem() {
@@ -611,6 +632,7 @@ async function attachMedia(taskId, files) {
   item.media = item.media || [];
   if (uploaded.length) {
     item.media.push(...uploaded.map((file, index) => ({ ...file, data_url: localMedia[index]?.data_url || '', uploaded: true })));
+    item.media_count = Number(item.media_count || 0) + uploaded.length;
   } else {
     item.media.push(...localMedia);
   }
@@ -757,11 +779,20 @@ async function loadAdmin() {
 
 async function updateBlessing(id, action) {
   const item = state.blessings.find((b) => String(b.id) === String(id));
+  if (action === 'complete' && item && !hasUploadedMedia(item)) {
+    setWorkerMessage('请先上传照片或视频，再点击完成。');
+    return;
+  }
   const flowSelect = Array.from(document.querySelectorAll('[data-flow-target]')).find((node) => String(node.dataset.flowTarget) === String(id));
   const selectedTakerId = Number(flowSelect?.value || state.takers[0]?.id || 0) || null;
   try {
     await api(`/api/blessings/${id}`, { method: 'PATCH', body: JSON.stringify({ action, taker_id: selectedTakerId }) });
-  } catch (_) {}
+  } catch (err) {
+    if (action === 'complete') {
+      setWorkerMessage(err.message || '完成失败，请确认已上传照片或视频。');
+      return;
+    }
+  }
   if (item) {
     if (action === 'accept') {
       item.status = 'ACCEPTED';

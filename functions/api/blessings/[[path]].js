@@ -105,6 +105,11 @@ export async function onRequestPatch(context) {
     return ok(await blessingDetail(env.DB, id), '已流转分配');
   }
 
+  if (action === 'complete') {
+    const media = await env.DB.prepare("SELECT id FROM media_files WHERE owner_id = ? AND owner_type IN ('scenario','blessing') LIMIT 1").bind(id).first();
+    if (!media) return error('请先上传照片或视频，再完成需求', 400);
+  }
+
   const nextStatus = { accept: 'ACCEPTED', complete: 'COMPLETED', cancel: 'CANCELLED', return: 'RETURNED' }[action];
   const recordAction = { accept: 'ACCEPTED', complete: 'COMPLETED', cancel: 'CANCELLED', return: 'RETURNED' }[action];
   const note = { accept: '确认接单', complete: '完成需求', cancel: '取消需求', return: body.note || '退回需求' }[action];
