@@ -85,7 +85,8 @@ function shell(content) {
             <div><h1 class="brand-title">佛来运转</h1><p class="brand-subtitle">用心祈愿 福佑随行</p></div>
           </div>
           <nav class="tabs top-tabs">
-            ${tabButton('intro', '项目介绍')}
+            ${tabButton('intro', '首页')}
+            ${tabButton('projects', '项目介绍')}
             ${tabButton('release', '发布需求')}
             ${tabButton('mine', '我的需求')}
             ${tabButton('worker', '接单员任务台')}
@@ -132,30 +133,42 @@ function renderIntro() {
     </section>
     <section class="home-card home-card-primary">
       <button class="primary-entry" data-tab="release" type="button">
-        <span class="entry-icon">合掌</span>
+        <span class="entry-icon icon-ring">${icon('hands')}</span>
         <span class="entry-copy"><strong>发布需求</strong><em>填写祈愿信息，提交寺院祈福</em></span>
         <span class="entry-arrow">&rsaquo;</span>
       </button>
-      <button class="quick-row" data-tab="mine" type="button"><span class="quick-icon">手机</span><span class="quick-title">手机登记</span><span class="quick-sub">用于接收进度通知</span><span>&rsaquo;</span></button>
-      <button class="quick-row" data-tab="release" type="button"><span class="quick-icon">渠道</span><span class="quick-title">渠道码</span><span class="quick-sub">${escapeHtml(state.profile.channel_code || '请输入接单员渠道码')}</span><span>&rsaquo;</span></button>
+      <button class="quick-row" data-tab="mine" type="button"><span class="quick-icon">${icon('phone')}</span><span class="quick-title">手机登记</span><span class="quick-sub">用于接收进度通知</span><span>&rsaquo;</span></button>
+      <button class="quick-row" data-tab="release" type="button"><span class="quick-icon">${icon('qr')}</span><span class="quick-title">渠道码</span><span class="quick-sub">${escapeHtml(state.profile.channel_code || '请输入接单员渠道码')}</span><span>&rsaquo;</span></button>
     </section>
     <section class="home-card">
-      <button class="quick-row large" data-tab="mine" type="button"><span class="quick-icon search">查询</span><span class="quick-title">我的需求 / 进度查询</span><span class="quick-sub">输入编号查询进度，也可查看所有祈福记录</span><span>&rsaquo;</span></button>
+      <button class="quick-row large" data-tab="mine" type="button"><span class="quick-icon search">${icon('search')}</span><span class="quick-title">我的需求 / 进度查询</span><span class="quick-sub">输入编号查询进度，也可查看所有祈福记录</span><span>&rsaquo;</span></button>
     </section>
     <section class="status-strip">
-      <p>愿您的祈愿，早日圆满</p>
+      <p><span class="leaf-icon">${icon('leaf')}</span> 愿您的祈愿，早日圆满 <span class="leaf-icon">${icon('leaf')}</span></p>
       <div class="status-pair">
-        <button data-tab="mine" type="button"><strong>${pending}</strong><span>待完成</span></button>
-        <button data-tab="mine" type="button"><strong>${completed}</strong><span>已完成</span></button>
+        <button data-tab="mine" type="button"><span class="status-icon pending">${icon('hourglass')}</span><strong>${pending}</strong><span>待完成</span></button>
+        <button data-tab="mine" type="button"><span class="status-icon done">${icon('check')}</span><strong>${completed}</strong><span>已完成</span></button>
       </div>
     </section>
     <section class="link-grid">
-      <button data-tab="intro" type="button"><strong>项目介绍</strong><span>了解祈福项目</span></button>
-      <button data-tab="mine" type="button"><strong>查看相册</strong><span>已完成祈福回顾</span></button>
+      <button data-tab="projects" type="button"><span class="link-icon">${icon('temple')}</span><strong>项目介绍</strong><span>了解祈福项目</span></button>
+      <button data-tab="mine" type="button"><span class="link-icon">${icon('image')}</span><strong>查看相册</strong><span>已完成祈福回顾</span></button>
     </section>
-    <section class="panel section intro-projects"><h2>祈福项目</h2><div class="card-list">${state.rituals.map(ritualCard).join('')}</div></section>`;
+    <section class="home-blessing"><span class="leaf-icon">${icon('leaf')}</span> 佛前祈愿，心诚则灵。愿您平安顺遂，吉祥如意。</section>`;
 }
 
+function renderProjects() {
+  return `
+    <section class="panel page-panel project-page">
+      <div class="section-title with-icon"><span class="link-icon">${icon('temple')}</span><div><h2>项目介绍</h2><p class="meta">后台新增或修改祈福项目后，会自动显示在这里。</p></div></div>
+      <div class="project-list">${state.rituals.map(projectCard).join('') || '<p class="meta">暂无项目介绍。</p>'}</div>
+    </section>`;
+}
+
+function projectCard(r) {
+  const price = r.price_cents ? `¥${(r.price_cents / 100).toFixed(2)}` : '价格后台设置';
+  return `<article class="project-card"><div class="project-icon">${icon('temple')}</div><div><h3>${escapeHtml(r.name)}</h3><p>${escapeHtml(r.description || '暂无介绍，后续可在后台补充。')}</p><span class="meta">${price}</span></div></article>`;
+}
 function ritualCard(r) {
   const price = r.price_cents ? `¥${(r.price_cents / 100).toFixed(2)}` : '价格后台设置';
   return `<div class="ritual-card"><strong>${escapeHtml(r.name)}</strong><span class="meta">${price}</span><p>${escapeHtml(r.description || '暂无介绍')}</p></div>`;
@@ -340,6 +353,20 @@ function guessContentType(name = '', path = '') {
   return '';
 }
 
+function icon(name) {
+  const icons = {
+    hands: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8.7 12.8V4.9a1.7 1.7 0 0 1 3.4 0v7.3"/><path d="M12.1 12.2V4.2a1.7 1.7 0 0 1 3.4 0v9.7"/><path d="M8.7 8.5 5.9 5.7a1.6 1.6 0 0 0-2.3 2.2l4.6 5.8c.8 1 1.4 2.1 1.8 3.3l.7 2.2"/><path d="M15.5 9.4 18 6.9a1.6 1.6 0 0 1 2.3 2.2l-3.9 5.2c-.7 1-1.3 2.1-1.6 3.3l-.4 1.6"/></svg>',
+    phone: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="2.8" width="10" height="18.4" rx="2.2"/><path d="M10.5 18h3"/></svg>',
+    qr: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1"/><rect x="15" y="3" width="6" height="6" rx="1"/><rect x="3" y="15" width="6" height="6" rx="1"/><path d="M15 15h2.6v2.6H21M21 21h-6v-3M12 3v4M12 12h3M12 18h1.8"/></svg>',
+    search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.4"/><path d="m15.4 15.4 5 5"/></svg>',
+    hourglass: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10M7 21h10M8 3c0 4 2.7 5.4 4 7 1.3-1.6 4-3 4-7M8 21c0-4 2.7-5.4 4-7 1.3 1.6 4 3 4 7"/></svg>',
+    check: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="m8 12.4 2.6 2.6L16.5 9"/></svg>',
+    temple: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21h16M6 18h12M7 18v-6h10v6M5 12h14L12 6 5 12ZM8 8V5h8v3"/></svg>',
+    image: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8" cy="10" r="1.5"/><path d="m5.5 17 4.2-4.2 3 3 2.2-2.2 3.6 3.4"/></svg>',
+    leaf: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19c8-1 12-6 14-14C11 7 6 11 5 19Z"/><path d="M5 19c4-4 7-6 12-9"/></svg>'
+  };
+  return icons[name] || '';
+}
 function ritualName(id) {
   return state.rituals.find((r) => String(r.id) === String(id))?.name || '祈福项目';
 }
@@ -359,7 +386,7 @@ function escapeAttr(value = '') {
 }
 
 function render() {
-  const views = { intro: renderIntro, release: renderRelease, query: renderMine, mine: renderMine, worker: renderWorker, admin: renderAdmin };
+  const views = { intro: renderIntro, projects: renderProjects, release: renderRelease, query: renderMine, mine: renderMine, worker: renderWorker, admin: renderAdmin };
   document.getElementById('app').innerHTML = shell(views[state.tab]());
   bindEvents();
 }
