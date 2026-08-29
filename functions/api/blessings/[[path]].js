@@ -10,7 +10,8 @@ async function blessingDetail(db, id) {
   const items = await db.prepare('SELECT * FROM blessing_items WHERE blessing_id = ? ORDER BY id').bind(id).all();
   const records = await db.prepare('SELECT * FROM blessing_records WHERE blessing_id = ? ORDER BY created_at, id').bind(id).all();
   const scenarios = await db.prepare('SELECT * FROM scenarios WHERE blessing_id = ? ORDER BY created_at DESC, id DESC').bind(id).all();
-  return { info, items: items.results || [], records: records.results || [], scenarios: scenarios.results || [] };
+  const media = await db.prepare("SELECT id, owner_type, owner_id, r2_key, url, filename, content_type, size, created_at FROM media_files WHERE owner_id = ? AND owner_type IN ('scenario','blessing') ORDER BY created_at DESC, id DESC").bind(id).all();
+  return { info, items: items.results || [], records: records.results || [], scenarios: scenarios.results || [], media: media.results || [] };
 }
 
 function safeListRow(row, admin = false) {
@@ -116,3 +117,4 @@ export async function onRequestPatch(context) {
   ]);
   return ok(await blessingDetail(env.DB, id), note);
 }
+

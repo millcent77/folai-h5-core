@@ -5,7 +5,8 @@ const demoRituals = [
 ];
 
 const demoTakers = [
-  { id: 1, nickname: '示例接单员', taker_code: 'T001' }
+  { id: 1, nickname: '示例接单员', taker_code: 'T001' },
+  { id: 2, nickname: '后续接单员', taker_code: 'T002' }
 ];
 
 const storageKeys = {
@@ -21,7 +22,8 @@ const state = {
   blessings: JSON.parse(localStorage.getItem(storageKeys.blessings) || '[]'),
   profile: JSON.parse(localStorage.getItem(storageKeys.profile) || '{}'),
   releaseItems: [{ ritual_id: 1, quantity: 1 }],
-  adminToken: localStorage.getItem(storageKeys.adminToken) || ''
+  adminToken: localStorage.getItem(storageKeys.adminToken) || '',
+  workerNotice: ''
 };
 
 const statusText = {
@@ -218,7 +220,7 @@ function renderMine() {
 
 function renderWorker() {
   const rows = state.blessings.filter((b) => b.status !== 'COMPLETED' && b.status !== 'CANCELLED').map(cardForWorker).join('') || '<p class="meta">暂无待办任务。</p>';
-  return `<section class="panel page-panel"><h2>接单员任务台</h2><div class="notice">部署后，确认接单、上传照片视频、流转和完成都由管理员 Token 保护。未部署时可本机演示状态变化。</div><div class="card-list section-sm">${rows}</div><div class="actions"><button class="secondary" data-tab="admin">后台管理</button></div></section>`;
+  return `<section class="panel page-panel"><h2>接单员任务台</h2><div class="notice">选择文件时可一次选择多张照片/多个视频；未配置后台 Token 时先走本机演示，配置后会上传到 R2。</div><div id="workerResult" class="result">${state.workerNotice ? `<div class="notice">${escapeHtml(state.workerNotice)}</div>` : ""}</div><div class="card-list section-sm">${rows}</div><div class="actions"><button class="secondary" data-tab="admin">后台管理</button></div></section>`;
 }
 
 function renderAdmin() {
@@ -245,15 +247,26 @@ function select(name, label, options) {
 
 function cardForBlessing(b) {
   const itemText = (b.items || []).map((i) => `${i.ritual_name || ritualName(i.ritual_id)} x ${i.quantity}`).join('，') || b.ritual_name || '';
-  return `<article class="ritual-card"><strong>${escapeHtml(b.task_id)}</strong><span class="status ${b.status}">${statusText[b.status] || b.status}</span><p>${escapeHtml(b.real_name)} · ${escapeHtml(b.birthday)} · ${escapeHtml(itemText)}</p><span class="meta">查询码：${escapeHtml(b.access_code || '')} · 渠道码：${escapeHtml(b.channel_code || '-')}</span><div class="actions"><button class="secondary" data-detail="${b.task_id}">项目详情</button><button class="secondary" data-album="${b.task_id}">查看相册</button></div></article>`;
+  return `<article class="ritual-card"><div class="card-head"><strong>${escapeHtml(b.task_id)}</strong><span class="status ${b.status}">${statusText[b.status] || b.status}</span></div><p>${escapeHtml(b.real_name)} · ${escapeHtml(b.birthday)} · ${escapeHtml(itemText)}</p><p class="meta">性别：${escapeHtml(b.sex || '-')} · 年龄：${escapeHtml(b.age || '-')} · 渠道码：${escapeHtml(b.channel_code || '-')}</p><span class="meta">查询码：${escapeHtml(b.access_code || '')}</span><div class="actions"><button class="secondary" data-detail="${b.task_id}">项目详情</button><button class="secondary" data-album="${b.task_id}">查看相册</button></div></article>`;
 }
 
 function cardForWorker(b) {
-  return `<article class="ritual-card"><strong>${b.task_id}</strong><p>${escapeHtml(b.real_name)} · 渠道码 ${escapeHtml(b.channel_code || '-')}</p><label class="field">拍照/视频上传<input type="file" accept="image/*,video/*" capture="environment" multiple data-files="${b.task_id}"></label><div class="actions"><button class="secondary" data-action="accept" data-id="${b.id}">确认接单</button><button class="secondary" data-action="assign" data-id="${b.id}">流转</button><button class="primary" data-action="complete" data-id="${b.id}">完成</button></div></article>`;
+  const itemText = (b.items || []).map((i) => `${i.ritual_name || ritualName(i.ritual_id)} x ${i.quantity}`).join('，') || b.ritual_name || '祈福项目';
+  return `<article class="ritual-card worker-card">
+    <div class="card-head"><strong>${escapeHtml(b.task_id)}</strong><span class="status ${b.status}">${statusText[b.status] || b.status}</span></div>
+    <p>${escapeHtml(b.real_name)} · ${escapeHtml(b.sex || '-')} · ${escapeHtml(b.age || '-')}岁 · ${escapeHtml(itemText)}</p>
+    <p class="meta">生日：${escapeHtml(b.birthday || '-')} · 属相：${escapeHtml(b.zodiac || '-')} · 渠道码：${escapeHtml(b.channel_code || '-')}</p>
+    <p class="meta">当前接单员：${escapeHtml(takerName(b.current_taker_id) || '未指定')}</p>
+    <div class="actions"><button class="secondary" data-detail="${b.task_id}">订单详情</button><button class="secondary" data-action="accept" data-id="${b.id}">确认接单</button></div>
+    <label class="field full">流转给后续接单员<select data-flow-target="${b.id}">${state.takers.map((t) => `<option value="${t.id}" ${String(b.current_taker_id) === String(t.id) ? 'selected' : ''}>${escapeHtml(t.nickname || t.taker_code || t.id)}（${escapeHtml(t.taker_code || '-') }）</option>`).join('')}</select></label>
+    <div class="actions"><button class="secondary" data-action="assign" data-id="${b.id}">确认流转</button><button class="primary" data-action="complete" data-id="${b.id}">完成</button></div>
+    <label class="field full">拍照/视频上传<input type="file" accept="image/*,video/*" capture="environment" multiple data-files="${b.task_id}"></label>
+    <div class="upload-preview">${mediaPreviewHtml(b.media || [], b)}</div>
+  </article>`;
 }
 
 function adminRow(b) {
-  return `<tr><td>${escapeHtml(b.task_id)}</td><td>${escapeHtml(b.real_name)}</td><td>${escapeHtml(b.channel_code || '-')}</td><td>${statusText[b.status] || b.status}</td><td>${b.current_taker_id || '-'}</td><td><button class="secondary" data-action="accept" data-id="${b.id}">接单</button> <button class="primary" data-action="complete" data-id="${b.id}">完成</button></td></tr>`;
+  return `<tr><td>${escapeHtml(b.task_id)}</td><td>${escapeHtml(b.real_name)}</td><td>${escapeHtml(b.channel_code || '-')}</td><td>${statusText[b.status] || b.status}</td><td>${escapeHtml(takerName(b.current_taker_id) || '-')}</td><td><button class="secondary" data-detail="${b.task_id}">详情</button> <button class="secondary" data-action="accept" data-id="${b.id}">接单</button> <button class="primary" data-action="complete" data-id="${b.id}">完成</button></td></tr>`;
 }
 
 function renderDetail(detail) {
@@ -261,20 +274,57 @@ function renderDetail(detail) {
   const items = detail.items || info.items || [];
   const records = detail.records || info.records || [];
   const scenarios = detail.scenarios || info.scenarios || [];
-  return `<div class="panel"><h3>需求详情 ${escapeHtml(info.task_id)}</h3><span class="status ${info.status}">${statusText[info.status] || info.status}</span><p>${escapeHtml(info.real_name)} · ${escapeHtml(info.birthday)} · ${escapeHtml(info.zodiac || '')} · 渠道码 ${escapeHtml(info.channel_code || '-')}</p><p>${escapeHtml(info.remark_text || '')}</p><h3>项目</h3>${items.map((i) => `<p>${escapeHtml(i.ritual_name || ritualName(i.ritual_id))} x ${i.quantity}</p>`).join('') || '<p class="meta">暂无项目明细</p>'}<h3>现场概况</h3>${scenarios.map((s) => `<p>${escapeHtml(s.created_at || '')} ${escapeHtml(s.note || '')}</p>`).join('') || '<p class="meta">暂无现场概况</p>'}<h3>流转记录</h3>${records.map((r) => `<p>${escapeHtml(r.created_at || '')} · ${escapeHtml(r.note || r.action)}</p>`).join('') || '<p class="meta">暂无记录</p>'}</div>`;
+  const media = detail.media || info.media || [];
+  return `<div class="panel detail-panel"><h3>需求详情 ${escapeHtml(info.task_id)}</h3><span class="status ${info.status}">${statusText[info.status] || info.status}</span><div class="detail-grid"><span>姓名：${escapeHtml(info.real_name)}</span><span>性别：${escapeHtml(info.sex || '-')}</span><span>年龄：${escapeHtml(info.age || '-')}</span><span>生日：${escapeHtml(info.birthday || '-')}</span><span>属相：${escapeHtml(info.zodiac || '-')}</span><span>渠道码：${escapeHtml(info.channel_code || '-')}</span><span>手机号：${escapeHtml(info.mobile || '-')}</span><span>接单员：${escapeHtml(takerName(info.current_taker_id) || '未指定')}</span></div><p>${escapeHtml(info.remark_text || '')}</p><h3>项目</h3>${items.map((i) => `<p>${escapeHtml(i.ritual_name || ritualName(i.ritual_id))} x ${i.quantity}</p>`).join('') || '<p class="meta">暂无项目明细</p>'}<h3>现场概况</h3>${scenarios.map((s) => `<p>${escapeHtml(s.created_at || '')} ${escapeHtml(s.note || '')}</p>`).join('') || '<p class="meta">暂无现场概况</p>'}<h3>照片/视频</h3>${mediaPreviewHtml(media, info)}<h3>流转记录</h3>${records.map((r) => `<p>${escapeHtml(r.created_at || '')} · ${escapeHtml(r.note || r.action)}</p>`).join('') || '<p class="meta">暂无记录</p>'}</div>`;
 }
 
 function renderAlbum(b) {
-  const media = b.media || [];
-  return `<div class="panel"><h3>相册 ${escapeHtml(b.task_id)}</h3>${media.length ? `<div class="album-grid">${media.map((m) => `<div class="album-item"><strong>${escapeHtml(m.name)}</strong><span class="meta">${escapeHtml(m.type || '文件')}</span></div>`).join('')}</div>` : '<p class="meta">完成后，接单员上传的照片和视频会显示在这里。正式部署后文件保存在 R2。</p>'}</div>`;
+  const media = b.media || b.files || [];
+  return `<div class="panel"><h3>相册 ${escapeHtml(b.task_id)}</h3>${media.length ? `<div class="album-grid">${mediaPreviewHtml(media, b)}</div>` : '<p class="meta">完成后，接单员上传的照片和视频会显示在这里。正式部署后文件保存在 R2。</p>'}</div>`;
+}
+
+function mediaPreviewHtml(media, context = {}) {
+  if (!media.length) return '<p class="meta">暂无照片或视频。</p>';
+  return media.map((m) => {
+    const name = m.name || m.filename || '现场文件';
+    const type = m.type || m.content_type || '';
+    const src = mediaUrl(m, context);
+    if (type.startsWith('video/')) {
+      return `<div class="album-item"><video src="${escapeAttr(src)}" controls playsinline></video><span>${escapeHtml(name)}</span></div>`;
+    }
+    if (type.startsWith('image/') || src.startsWith('data:image') || src.match(/\.(png|jpe?g|webp|gif)(\?|$)/i)) {
+      return `<div class="album-item"><img src="${escapeAttr(src)}" alt="${escapeAttr(name)}"><span>${escapeHtml(name)}</span></div>`;
+    }
+    return `<div class="album-item file-item"><strong>${escapeHtml(name)}</strong><span class="meta">${escapeHtml(type || '文件')}</span></div>`;
+  }).join('');
+}
+
+function mediaUrl(media, context = {}) {
+  const src = media.data_url || media.preview_url || media.url || '';
+  if (!src || src.startsWith('data:') || src.startsWith('blob:')) return src;
+  if (context.task_id && context.access_code && src.startsWith('/api/media/')) {
+    const separator = src.includes('?') ? '&' : '?';
+    return `${src}${separator}task_id=${encodeURIComponent(context.task_id)}&access_code=${encodeURIComponent(context.access_code)}`;
+  }
+  return src;
 }
 
 function ritualName(id) {
   return state.rituals.find((r) => String(r.id) === String(id))?.name || '祈福项目';
 }
 
+function takerName(id) {
+  if (!id) return '';
+  const taker = state.takers.find((t) => String(t.id) === String(id));
+  return taker ? `${taker.nickname || taker.real_name || '接单员'} ${taker.taker_code ? '(' + taker.taker_code + ')' : ''}` : `接单员 ${id}`;
+}
+
 function escapeHtml(value = '') {
   return String(value).replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+}
+
+function escapeAttr(value = '') {
+  return escapeHtml(value).replace(/'/g, '&#39;');
 }
 
 function render() {
@@ -295,7 +345,7 @@ function bindEvents() {
   document.getElementById('saveToken')?.addEventListener('click', saveToken);
   document.getElementById('loadAdmin')?.addEventListener('click', loadAdmin);
   document.querySelectorAll('[data-action]').forEach((button) => button.addEventListener('click', () => updateBlessing(button.dataset.id, button.dataset.action)));
-  document.querySelectorAll('[data-files]').forEach((input) => input.addEventListener('change', () => attachLocalMedia(input.dataset.files, input.files)));
+  document.querySelectorAll('[data-files]').forEach((input) => input.addEventListener('change', () => attachMedia(input.dataset.files, input.files)));
 }
 
 function submitProfile(event) {
@@ -376,6 +426,7 @@ function addLocalBlessing(data, body) {
     sex: body.sex,
     channel_code: body.channel_code,
     remark_text: body.remark_text,
+    current_taker_id: null,
     items: body.items.map((item) => ({ ...item, ritual_name: ritualName(item.ritual_id) })),
     media: [],
     records: [{ action: 'CREATED', note: '创建祈福需求', created_at: new Date().toLocaleString() }],
@@ -399,7 +450,8 @@ async function submitQuery(event) {
     const first = listData.list?.[0];
     if (!first) throw new Error('没有查询到需求');
     const detail = await api(`/api/blessings/${first.id}?task_id=${encodeURIComponent(taskId)}&access_code=${encodeURIComponent(accessCode)}`);
-    document.getElementById('queryResult').innerHTML = renderDetail(detail);
+    const viewModel = { ...detail, info: { ...detail.info, task_id: taskId, access_code: accessCode } };
+    document.getElementById('queryResult').innerHTML = renderDetail(viewModel) + renderAlbum({ task_id: taskId, access_code: accessCode, media: detail.media || [] });
   } catch (err) {
     const local = state.blessings.find((b) => b.task_id === taskId && b.access_code === accessCode);
     document.getElementById('queryResult').innerHTML = local ? renderDetail(local) + renderAlbum(local) : `<div class="notice">${escapeHtml(err.message)}</div>`;
@@ -428,14 +480,54 @@ function bindModalClose() {
   }));
 }
 
-function attachLocalMedia(taskId, files) {
+async function attachMedia(taskId, files) {
   const item = state.blessings.find((b) => b.task_id === taskId);
   if (!item || !files?.length) return;
+  const fileList = Array.from(files);
+  setWorkerMessage(`正在处理 ${fileList.length} 个文件...`);
+
+  let uploaded = [];
+  if (state.adminToken && item.id) {
+    try {
+      const form = new FormData();
+      fileList.forEach((file) => form.append('file', file));
+      form.append('owner_type', 'scenario');
+      form.append('owner_id', item.id);
+      form.append('note', '接单员上传现场照片/视频');
+      const data = await api('/api/upload', { method: 'POST', body: form });
+      uploaded = (data.files || []).map((file) => ({ ...file, type: file.content_type, name: file.filename }));
+    } catch (err) {
+      setWorkerMessage(`R2 上传失败，已保留本机预览：${err.message}`);
+    }
+  }
+
+  const localMedia = await Promise.all(fileList.map(fileToMedia));
   item.media = item.media || [];
-  Array.from(files).forEach((file) => item.media.push({ name: file.name, type: file.type || '文件' }));
+  if (uploaded.length) {
+    item.media.push(...uploaded.map((file, index) => ({ ...file, data_url: localMedia[index]?.data_url || '', uploaded: true })));
+  } else {
+    item.media.push(...localMedia);
+  }
   item.records = item.records || [];
-  item.records.push({ action: 'UPLOADED', note: `上传 ${files.length} 个照片/视频`, created_at: new Date().toLocaleString() });
+  item.records.push({ action: 'UPLOADED', note: `上传 ${fileList.length} 个照片/视频`, created_at: new Date().toLocaleString() });
   saveDemo();
+  setWorkerMessage(`已上传/加入 ${fileList.length} 个文件，可在订单详情和相册中预览。`);
+  render();
+}
+
+function fileToMedia(file) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve({ name: file.name, type: file.type || '文件', size: file.size || 0, data_url: reader.result });
+    reader.onerror = () => resolve({ name: file.name, type: file.type || '文件', size: file.size || 0, data_url: '' });
+    reader.readAsDataURL(file);
+  });
+}
+
+function setWorkerMessage(message) {
+  state.workerNotice = message;
+  const result = document.getElementById('workerResult');
+  if (result) result.innerHTML = `<div class="notice">${escapeHtml(message)}</div>`;
 }
 
 function saveToken() {
@@ -458,23 +550,39 @@ async function loadAdmin() {
 }
 
 async function updateBlessing(id, action) {
-  const taker = state.takers[0];
-  try {
-    await api(`/api/blessings/${id}`, { method: 'PATCH', body: JSON.stringify({ action, taker_id: taker?.id }) });
-  } catch (_) {}
   const item = state.blessings.find((b) => String(b.id) === String(id));
+  const selectedTakerId = Number(document.querySelector(`[data-flow-target="${CSS.escape(String(id))}"]`)?.value || state.takers[0]?.id || 0) || null;
+  try {
+    await api(`/api/blessings/${id}`, { method: 'PATCH', body: JSON.stringify({ action, taker_id: selectedTakerId }) });
+  } catch (_) {}
   if (item) {
-    if (action === 'accept') item.status = 'ACCEPTED';
+    if (action === 'accept') {
+      item.status = 'ACCEPTED';
+      item.current_taker_id = item.current_taker_id || selectedTakerId || state.takers[0]?.id || null;
+      addRecord(item, 'ACCEPTED', `已由 ${takerName(item.current_taker_id) || '接单员'} 确认接单`);
+      setWorkerMessage(`${item.task_id} 已确认接单。`);
+    }
     if (action === 'complete') {
       item.status = 'COMPLETED';
       item.completed_at = new Date().toISOString();
+      addRecord(item, 'COMPLETED', '需求已完成，用户可查看相册');
+      setWorkerMessage(`${item.task_id} 已完成，已进入用户已完成列表。`);
     }
-    if (action === 'assign') item.current_taker_id = taker?.id || 1;
-    item.records = item.records || [];
-    item.records.push({ action: action.toUpperCase(), note: statusText[item.status] || action, created_at: new Date().toLocaleString() });
+    if (action === 'assign') {
+      item.current_taker_id = selectedTakerId;
+      item.status = 'PENDING';
+      addRecord(item, 'ASSIGNED', `已流转给 ${takerName(selectedTakerId) || '后续接单员'}`);
+      setWorkerMessage(`${item.task_id} 已流转给 ${takerName(selectedTakerId) || '后续接单员'}。`);
+    }
     saveDemo();
   }
   render();
 }
 
+function addRecord(item, action, note) {
+  item.records = item.records || [];
+  item.records.push({ action, note, created_at: new Date().toLocaleString() });
+}
+
 bootstrap();
+
