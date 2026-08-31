@@ -1,4 +1,4 @@
-import { ok, error, readJson, getPathId, requireAdmin, makeTaskId } from '../_shared.js';
+import { ok, error, readJson, getPathId, requireAdmin, makeTaskId, getTakerIdentity, ensureTakerUser, canAccessBlessing } from '../_shared.js';
 
 function makeAccessCode() { return String(Math.floor(Math.random() * 900000 + 100000)); }
 function maskMobile(value = '') { if (!value || value.length < 7) return value || ''; return value.slice(0, 3) + '****' + value.slice(-4); }
@@ -34,8 +34,10 @@ export async function onRequestGet(context) {
   if (id) {
     const detail = await blessingDetail(env.DB, id);
     if (!detail) return error('祈福需求不存在', 404);
-    if (!admin && (accessCode !== detail.info.access_code || taskId !== detail.info.task_id)) return error('请提供需求编号和查询码后查看详情', 403);
-    return ok(safeDetail(detail, admin));
+    const taker = admin ? null : await getTakerIdentity(request, env);
+    const canTakerRead = taker ? await canAccessBlessing(env.DB, detail.info, taker) : false;
+    if (!admin && !canTakerRead && (accessCode !== detail.info.access_code || taskId !== detail.info.task_id)) return error('请提供需求编号和查询码后查看详情', 403);
+    return ok(safeDetail(detail, admin || canTakerRead));
   }
 
   const status = normalizeStatus(url.searchParams.get('status'));
@@ -70,8 +72,9 @@ export async function onRequestPost({ request, env }) {
   if (!env.DB) return ok({ task_id: taskId, access_code: accessCode, demo: true }, '演示模式：需求已模拟提交');
 
   const remarkImages = Array.isArray(body.remark_images) ? body.remark_images.join(',') : '';
-  const insert = await env.DB.prepare('INSERT INTO blessings (task_id, access_code, channel_code, real_name, mobile, birthday, age, zodiac, sex, remark_text, remark_images) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(taskId, accessCode, channelCode, realName, body.mobile || '', birthday, Number(body.age || 0), body.zodiac || '', body.sex || '', body.remark_text || '', remarkImages)
+  const taker = await ensureTakerUser(env.DB, { taker_code: channelCode, nickname: channelCode, real_name: channelCode });
+  const insert = await env.DB.prepare('INSERT INTO blessings (task_id, access_code, channel_code, real_name, mobile, birthday, age, zodiac, sex, remark_text, remark_images, current_taker_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .bind(taskId, accessCode, channelCode, realName, body.mobile || '', birthday, Number(body.age || 0), body.zodiac || '', body.sex || '', body.remark_text || '', remarkImages, taker?.id || null)
     .run();
   const blessingId = insert.meta.last_row_id;
 
@@ -81,26 +84,35 @@ export async function onRequestPost({ request, env }) {
     if (!ritual) continue;
     await env.DB.prepare('INSERT INTO blessing_items (blessing_id, ritual_id, ritual_name, quantity) VALUES (?, ?, ?, ?)').bind(blessingId, ritual.id, ritual.name, Number(item.quantity || 1)).run();
   }
-  await env.DB.prepare('INSERT INTO blessing_records (blessing_id, action, note) VALUES (?, ?, ?)').bind(blessingId, 'CREATED', '创建祈福需求').run();
+  await env.DB.prepare('INSERT INTO blessing_records (blessing_id, action, to_taker_id, note) VALUES (?, ?, ?, ?)').bind(blessingId, 'CREATED', taker?.id || null, '创建祈福需求，自动分配到渠道码 ' + channelCode).run();
   return ok({ id: blessingId, task_id: taskId, access_code: accessCode }, '需求创建成功');
 }
 
 export async function onRequestPatch(context) {
   const { request, env } = context;
-  if (!requireAdmin(request, env)) return error('后台操作需要管理员 Token', 401);
+  const admin = requireAdmin(request, env);
   const id = getPathId(context);
   if (!id) return error('缺少需求 ID');
-  if (!env.DB) return error('D1 未绑定，不能执行后台写操作', 503);
+  if (!env.DB) return error('D1 未绑定，不能执行写操作', 503);
   const body = await readJson(request);
   const action = body.action;
-  const actorId = Number(body.actor_user_id || 0) || null;
+  const blessing = await env.DB.prepare('SELECT * FROM blessings WHERE id = ?').bind(id).first();
+  if (!blessing) return error('祈福需求不存在', 404);
+  const taker = admin ? null : await getTakerIdentity(request, env, { create: true });
+  const allowed = admin || await canAccessBlessing(env.DB, blessing, taker);
+  if (!allowed) return error('此接单员不能操作这条需求', 403);
+  const actorId = admin ? (Number(body.actor_user_id || 0) || null) : taker.id;
+  const fromTakerId = Number(blessing.current_taker_id || 0) || (taker?.id || null);
 
   if (action === 'assign') {
-    const takerId = Number(body.taker_id);
-    if (!takerId) return error('请选择接单员');
+    const targetCode = String(body.taker_code || '').trim();
+    let target = null;
+    if (targetCode) target = await ensureTakerUser(env.DB, { taker_code: targetCode, nickname: targetCode, real_name: targetCode });
+    const takerId = Number(body.taker_id || target?.id || 0);
+    if (!takerId) return error('请输入要流转的渠道码/接单员号');
     await env.DB.batch([
       env.DB.prepare("UPDATE blessings SET current_taker_id = ?, status = 'PENDING', updated_at = datetime('now') WHERE id = ?").bind(takerId, id),
-      env.DB.prepare('INSERT INTO blessing_records (blessing_id, actor_user_id, action, to_taker_id, note) VALUES (?, ?, ?, ?, ?)').bind(id, actorId, 'ASSIGNED', takerId, '流转分配')
+      env.DB.prepare('INSERT INTO blessing_records (blessing_id, actor_user_id, action, from_taker_id, to_taker_id, note) VALUES (?, ?, ?, ?, ?, ?)').bind(id, actorId, 'ASSIGNED', fromTakerId, takerId, '流转给接单员 ' + (targetCode || takerId))
     ]);
     return ok(await blessingDetail(env.DB, id), '已流转分配');
   }
@@ -116,10 +128,12 @@ export async function onRequestPatch(context) {
   if (!nextStatus) return error('未知操作');
   const completedSql = action === 'complete' ? ", completed_at = datetime('now')" : '';
   const acceptedSql = action === 'accept' ? ", accepted_at = datetime('now')" : '';
+  const assignSelfSql = action === 'accept' && taker?.id ? ', current_taker_id = ?' : '';
+  const updateStmt = env.DB.prepare('UPDATE blessings SET status = ?' + completedSql + acceptedSql + assignSelfSql + ", updated_at = datetime('now') WHERE id = ?");
+  const updateArgs = action === 'accept' && taker?.id ? [nextStatus, taker.id, id] : [nextStatus, id];
   await env.DB.batch([
-    env.DB.prepare('UPDATE blessings SET status = ?' + completedSql + acceptedSql + ", updated_at = datetime('now') WHERE id = ?").bind(nextStatus, id),
-    env.DB.prepare('INSERT INTO blessing_records (blessing_id, actor_user_id, action, note) VALUES (?, ?, ?, ?)').bind(id, actorId, recordAction, note)
+    updateStmt.bind(...updateArgs),
+    env.DB.prepare('INSERT INTO blessing_records (blessing_id, actor_user_id, action, from_taker_id, note) VALUES (?, ?, ?, ?, ?)').bind(id, actorId, recordAction, fromTakerId, note)
   ]);
   return ok(await blessingDetail(env.DB, id), note);
 }
-

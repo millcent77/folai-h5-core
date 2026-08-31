@@ -1,4 +1,4 @@
-import { error, requireAdmin } from '../_shared.js';
+import { error, requireAdmin, getTakerIdentity, canAccessBlessing } from '../_shared.js';
 
 function safeDecodePath(value = '') {
   try {
@@ -23,8 +23,11 @@ export async function onRequestGet({ request, params, env }) {
     const accessCode = url.searchParams.get('access_code') || '';
     const media = await env.DB.prepare('SELECT owner_id FROM media_files WHERE r2_key = ?').bind(key).first();
     if (!media || !media.owner_id) return error('无法验证媒体权限', 403);
-    const allowed = await env.DB.prepare('SELECT id FROM blessings WHERE id = ? AND task_id = ? AND access_code = ?').bind(media.owner_id, taskId, accessCode).first();
-    if (!allowed) return error('没有媒体访问权限', 403);
+    const blessing = await env.DB.prepare('SELECT * FROM blessings WHERE id = ?').bind(media.owner_id).first();
+    const taker = await getTakerIdentity(request, env);
+    const takerAllowed = taker ? await canAccessBlessing(env.DB, blessing, taker) : false;
+    const codeAllowed = blessing && taskId === blessing.task_id && accessCode === blessing.access_code;
+    if (!takerAllowed && !codeAllowed) return error('没有媒体访问权限', 403);
   }
 
   const object = await env.PRAYER_MEDIA.get(key);

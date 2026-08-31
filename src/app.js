@@ -55,6 +55,8 @@ function saveProfile() {
 async function api(path, options = {}) {
   const headers = { ...(options.headers || {}) };
   if (state.adminToken) headers.Authorization = `Bearer ${state.adminToken}`;
+  if (state.profile.phone) headers['x-taker-phone'] = state.profile.phone;
+  if (state.profile.channel_code) headers['x-taker-code'] = state.profile.channel_code;
   if (options.body && !(options.body instanceof FormData)) headers['content-type'] = 'application/json';
   const res = await fetch(path, { ...options, headers });
   const data = await res.json().catch(() => ({}));
@@ -120,6 +122,7 @@ function setTab(tab) {
   if (tab === 'release') ensureReleaseItems();
   state.tab = tab;
   render();
+  if (tab === 'worker') loadWorkerTasks();
 }
 
 function ensureReleaseItems() {
@@ -256,8 +259,20 @@ function renderMine() {
 }
 
 function renderWorker() {
-  const rows = state.blessings.filter((b) => b.status !== 'COMPLETED' && b.status !== 'CANCELLED').map(cardForWorker).join('') || '<p class="meta">暂无待办任务。</p>';
-  return `<section class="panel page-panel"><h2>接单员任务台</h2><div class="notice">选择文件时可一次选择多张照片/多个视频；保存后台 Token 后会上传到 R2，未保存 Token 只做本机临时预览。</div><div id="workerResult" class="result">${state.workerNotice ? `<div class="notice">${escapeHtml(state.workerNotice)}</div>` : ""}</div><div class="card-list section-sm">${rows}</div><div class="actions"><button class="secondary" data-tab="admin">后台管理</button></div></section>`;
+  const hasWorkerProfile = Boolean(state.profile.phone && state.profile.channel_code);
+  const rows = hasWorkerProfile
+    ? state.blessings.filter((b) => workerCanSeeLocal(b)).map(cardForWorker).join('') || '<p class="meta">暂无与此渠道码/接单员号相关的任务。</p>'
+    : '<p class="meta">请先到“我的需求”里用手机号和渠道码/接单员号登录。</p>';
+  return `<section class="panel page-panel"><h2>接单员任务台</h2><div class="notice">渠道码就是接单员号。别人发布需求时填写你的渠道码，订单会自动进入这里；经手流转后也会继续可查可看相册。</div><div class="actions"><button class="secondary" id="refreshWorkerTasks" type="button">刷新我的任务</button><button class="secondary" data-tab="mine">手机登录</button></div><div id="workerResult" class="result">${state.workerNotice ? `<div class="notice">${escapeHtml(state.workerNotice)}</div>` : ""}</div><div class="card-list section-sm">${rows}</div></section>`;
+}
+
+function workerCanSeeLocal(b) {
+  const code = state.profile.channel_code;
+  if (!code) return false;
+  if (b.channel_code === code) return true;
+  if (b.current_taker_code === code) return true;
+  if (state.profile.taker_id && String(b.current_taker_id || '') === String(state.profile.taker_id)) return true;
+  return (b.records || []).some((r) => String(r.note || '').includes(code));
 }
 
 function renderAdmin() {
@@ -291,14 +306,15 @@ function cardForWorker(b) {
   const itemText = (b.items || []).map((i) => `${i.ritual_name || ritualName(i.ritual_id)} x ${i.quantity}`).join('，') || b.ritual_name || '祈福项目';
   const accepted = b.status === 'ACCEPTED';
   const hasMedia = hasUploadedMedia(b);
+  const currentCode = takerCodeById(b.current_taker_id) || b.current_taker_code || b.channel_code || '';
   return `<article class="ritual-card worker-card compact-worker">
     <div class="worker-top"><strong>${escapeHtml(b.real_name || '-')}</strong><span class="status ${b.status}">${statusText[b.status] || b.status}</span></div>
     <div class="worker-info"><span>性别 ${escapeHtml(b.sex || '-')}</span><span>出生 ${escapeHtml(b.birthday || '-')}</span><span>属相 ${escapeHtml(b.zodiac || '-')}</span><span>年龄 ${escapeHtml(b.age || '-')}</span></div>
     <div class="worker-ritual">${escapeHtml(itemText)}</div>
-    <div class="worker-meta"><span>${escapeHtml(b.task_id)}</span><span>渠道码 ${escapeHtml(b.channel_code || '-')}</span></div>
+    <div class="worker-meta"><span>${escapeHtml(b.task_id)}</span><span>当前接单员 ${escapeHtml(currentCode || '-')}</span><span>渠道码 ${escapeHtml(b.channel_code || '-')}</span></div>
     <div class="actions"><button class="secondary" data-detail="${b.task_id}">详情</button><button class="secondary" data-action="accept" data-id="${b.id}" ${accepted ? 'disabled' : ''}>${accepted ? '已接单' : '确认接单'}</button></div>
-    ${accepted ? `<div class="upload-choice"><label class="field upload-field">拍照/选图片<input type="file" accept="image/*" capture="environment" multiple data-files="${b.task_id}"></label><label class="field upload-field">拍视频/选视频<input type="file" accept="video/*,.mp4,.mov,.webm" capture="environment" multiple data-files="${b.task_id}"></label><span class="meta">选择后会先压缩到 1MB 以内，再上传或加入预览。</span></div>` : '<div class="notice slim">确认接单后可上传照片/视频。</div>'}
-    <label class="field full">流转给后续接单员<select data-flow-target="${b.id}">${state.takers.map((t) => `<option value="${t.id}" ${String(b.current_taker_id) === String(t.id) ? 'selected' : ''}>${escapeHtml(t.nickname || t.taker_code || t.id)}（${escapeHtml(t.taker_code || '-') }）</option>`).join('')}</select></label>
+    ${accepted ? `<div class="upload-choice"><label class="field upload-field">拍照/选图片<input type="file" accept="image/*" capture="environment" multiple data-files="${b.task_id}"></label><label class="field upload-field">拍视频/选视频<input type="file" accept="video/*,.mp4,.mov,.webm" capture="environment" multiple data-files="${b.task_id}"></label><span class="meta">选择后会先压缩到 1MB 以内，再上传到 R2。</span></div>` : '<div class="notice slim">确认接单后可上传照片/视频，也可直接流转给其他接单员号。</div>'}
+    <label class="field full">流转给其他接单员号<input data-flow-code="${b.id}" type="text" placeholder="输入对方渠道码/接单员号，例如 T002"></label>
     <div class="actions"><button class="secondary" data-action="assign" data-id="${b.id}">确认流转</button><button class="primary" data-action="complete" data-id="${b.id}" ${hasMedia ? '' : 'disabled'}>${hasMedia ? '完成' : '上传后完成'}</button></div>
     <div class="upload-preview">${mediaPreviewHtml(b.media || [], b)}</div>
   </article>`;
@@ -351,6 +367,10 @@ function mediaUrl(media, context = {}) {
   if (context.task_id && context.access_code && src.startsWith('/api/media/')) {
     const separator = src.includes('?') ? '&' : '?';
     return `${src}${separator}task_id=${encodeURIComponent(context.task_id)}&access_code=${encodeURIComponent(context.access_code)}`;
+  }
+  if (state.profile.phone && state.profile.channel_code && src.startsWith('/api/media/')) {
+    const separator = src.includes('?') ? '&' : '?';
+    return `${src}${separator}taker_phone=${encodeURIComponent(state.profile.phone)}&taker_code=${encodeURIComponent(state.profile.channel_code)}`;
   }
   return src;
 }
@@ -412,6 +432,7 @@ function render() {
 
 function bindEvents() {
   document.querySelectorAll('[data-tab]').forEach((button) => button.addEventListener('click', () => setTab(button.dataset.tab)));
+  document.getElementById('refreshWorkerTasks')?.addEventListener('click', loadWorkerTasks);
   document.getElementById('profileForm')?.addEventListener('submit', submitProfile);
   document.getElementById('logoutProfile')?.addEventListener('click', logoutProfile);
   document.getElementById('logoutProfileInForm')?.addEventListener('click', logoutProfile);
@@ -428,7 +449,7 @@ function bindEvents() {
   bindMediaOpen();
 }
 
-function submitProfile(event) {
+async function submitProfile(event) {
   event.preventDefault();
   const form = new FormData(event.target);
   state.profile = {
@@ -438,7 +459,16 @@ function submitProfile(event) {
     password: String(form.get('profile_password') || '').trim()
   };
   saveProfile();
-  document.getElementById('profileResult').innerHTML = '<div class="notice">已登录并保存到本机浏览器。现在会显示此手机号下的本机订单。</div>';
+  try {
+    const data = await api('/api/profile', { method: 'POST', body: JSON.stringify(state.profile) });
+    state.profile.taker_id = data.id;
+    state.profile.channel_code = data.taker_code || state.profile.channel_code;
+    saveProfile();
+    document.getElementById('profileResult').innerHTML = '<div class="notice">已登录并同步接单员号。别人填写这个渠道码发布的订单，会进入你的任务台。</div>';
+    await loadWorkerTasks(false);
+  } catch (err) {
+    document.getElementById('profileResult').innerHTML = `<div class="notice">已保存到本机。云端同步失败：${escapeHtml(err.message)}</div>`;
+  }
   render();
 }
 
@@ -604,7 +634,7 @@ async function attachMedia(taskId, files) {
     return;
   }
   const sourceFiles = Array.from(files);
-  const willUploadToCloud = Boolean(state.adminToken && item.id);
+  const willUploadToCloud = Boolean((state.adminToken || (state.profile.phone && state.profile.channel_code)) && item.id);
   setWorkerMessage(`正在压缩 ${sourceFiles.length} 个文件，请稍候...`);
   const processed = await Promise.all(sourceFiles.map(prepareUploadFile));
   const fileList = processed.map((entry) => entry.file);
@@ -783,21 +813,20 @@ async function updateBlessing(id, action) {
     setWorkerMessage('请先上传照片或视频，再点击完成。');
     return;
   }
-  const flowSelect = Array.from(document.querySelectorAll('[data-flow-target]')).find((node) => String(node.dataset.flowTarget) === String(id));
-  const selectedTakerId = Number(flowSelect?.value || state.takers[0]?.id || 0) || null;
+  const flowInput = Array.from(document.querySelectorAll('[data-flow-code]')).find((node) => String(node.dataset.flowCode) === String(id));
+  const selectedTakerCode = String(flowInput?.value || '').trim();
   try {
-    await api(`/api/blessings/${id}`, { method: 'PATCH', body: JSON.stringify({ action, taker_id: selectedTakerId }) });
+    const detail = await api(`/api/blessings/${id}`, { method: 'PATCH', body: JSON.stringify({ action, taker_code: selectedTakerCode }) });
+    mergeBlessingDetail(detail);
   } catch (err) {
-    if (action === 'complete') {
-      setWorkerMessage(err.message || '完成失败，请确认已上传照片或视频。');
-      return;
-    }
+    setWorkerMessage(err.message || '操作失败');
+    return;
   }
   if (item) {
     if (action === 'accept') {
       item.status = 'ACCEPTED';
-      item.current_taker_id = item.current_taker_id || selectedTakerId || state.takers[0]?.id || null;
-      addRecord(item, 'ACCEPTED', `已由 ${takerName(item.current_taker_id) || '接单员'} 确认接单`);
+      item.current_taker_code = state.profile.channel_code || item.current_taker_code || '';
+      addRecord(item, 'ACCEPTED', `已由 ${state.profile.channel_code || '接单员'} 确认接单`);
       setWorkerMessage(`${item.task_id} 已确认接单。`);
     }
     if (action === 'complete') {
@@ -807,14 +836,59 @@ async function updateBlessing(id, action) {
       setWorkerMessage(`${item.task_id} 已完成，已进入用户已完成列表。`);
     }
     if (action === 'assign') {
-      item.current_taker_id = selectedTakerId;
+      item.current_taker_code = selectedTakerCode || item.current_taker_code || '';
       item.status = 'PENDING';
-      addRecord(item, 'ASSIGNED', `已流转给 ${takerName(selectedTakerId) || '后续接单员'}`);
-      setWorkerMessage(`${item.task_id} 已流转给 ${takerName(selectedTakerId) || '后续接单员'}。`);
+      addRecord(item, 'ASSIGNED', `已流转给 ${selectedTakerCode || '后续接单员'}`);
+      setWorkerMessage(`${item.task_id} 已流转给 ${selectedTakerCode || '后续接单员'}。`);
     }
     saveDemo();
   }
   render();
+}
+
+async function loadWorkerTasks(showMessage = true) {
+  if (!state.profile.phone || !state.profile.channel_code) {
+    if (showMessage) setWorkerMessage('请先用手机号和渠道码/接单员号登录。');
+    return;
+  }
+  if (showMessage) setWorkerMessage('正在刷新我的接单员任务...');
+  try {
+    const data = await api('/api/taker/tasks');
+    if (data.taker?.id) state.profile.taker_id = data.taker.id;
+    state.takers = mergeTakers(state.takers, data.taker ? [data.taker] : []);
+    mergeBlessings(data.list || []);
+    saveDemo();
+    if (showMessage) setWorkerMessage(`已加载 ${data.total || 0} 条与我相关的任务。`);
+    if (state.tab === 'worker') render();
+  } catch (err) {
+    if (showMessage) setWorkerMessage(err.message || '加载任务失败');
+  }
+}
+
+function mergeBlessings(list) {
+  for (const remote of list) {
+    const index = state.blessings.findIndex((b) => String(b.id) === String(remote.id) || b.task_id === remote.task_id);
+    if (index >= 0) state.blessings[index] = { ...state.blessings[index], ...remote };
+    else state.blessings.unshift(remote);
+  }
+}
+
+function mergeBlessingDetail(detail) {
+  if (!detail?.info) return;
+  const merged = { ...detail.info, items: detail.items || [], records: detail.records || [], scenarios: detail.scenarios || [], media: detail.media || [] };
+  mergeBlessings([merged]);
+}
+
+function mergeTakers(current, next) {
+  const map = new Map((current || []).map((t) => [String(t.id || t.taker_code), t]));
+  for (const taker of next || []) map.set(String(taker.id || taker.taker_code), { ...(map.get(String(taker.id || taker.taker_code)) || {}), ...taker });
+  return Array.from(map.values());
+}
+
+function takerCodeById(id) {
+  if (!id) return '';
+  const taker = state.takers.find((t) => String(t.id) === String(id));
+  return taker?.taker_code || '';
 }
 
 function addRecord(item, action, note) {
