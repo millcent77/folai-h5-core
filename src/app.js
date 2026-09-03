@@ -49,7 +49,8 @@ function saveDemo() {
 }
 
 function saveProfile() {
-  localStorage.setItem(storageKeys.profile, JSON.stringify(state.profile));
+  const { password, ...safeProfile } = state.profile;
+  localStorage.setItem(storageKeys.profile, JSON.stringify(safeProfile));
 }
 
 async function api(path, options = {}) {
@@ -57,6 +58,7 @@ async function api(path, options = {}) {
   if (state.adminToken) headers.Authorization = `Bearer ${state.adminToken}`;
   if (state.profile.phone) headers['x-taker-phone'] = state.profile.phone;
   if (state.profile.channel_code) headers['x-taker-code'] = state.profile.channel_code;
+  if (state.profile.password) headers['x-taker-password'] = state.profile.password;
   if (options.body && !(options.body instanceof FormData)) headers['content-type'] = 'application/json';
   const res = await fetch(path, { ...options, headers });
   const data = await res.json().catch(() => ({}));
@@ -109,7 +111,7 @@ function shell(content) {
 
 function profileBar() {
   if (state.tab === 'intro') return '';
-  const label = state.profile.phone ? `${escapeHtml(state.profile.nickname || '用户')} · ${escapeHtml(state.profile.phone)}` : '未登录手机';
+  const label = state.profile.phone ? `${escapeHtml(state.profile.nickname || '用户')} · ${escapeHtml(state.profile.phone)} · ${escapeHtml(state.profile.channel_code || '未绑定渠道码')}` : '未登录手机';
   const action = state.profile.phone ? '<button class="secondary small" id="logoutProfile">退出</button>' : '<button class="secondary small" data-tab="mine">登录</button>';
   return `<div class="profile-bar"><span>${label}</span>${action}</div>`;
 }
@@ -196,11 +198,11 @@ function renderRelease() {
   return `
     <section class="panel page-panel">
       <h2>发布祈福需求</h2>
-      <div class="notice">渠道码请填写接单员提供的编号，例如 T001。填写错误时，接单员可能看不到这条需求。</div>
+      <div class="notice">已登录并绑定渠道码时会自动使用绑定渠道码；首次未绑定时，必须填写接单员提供的渠道码。</div>
       <form id="releaseForm" class="form-grid section-sm">
         ${input('real_name', '姓名', 'text', true)}
         ${input('mobile', '手机号', 'tel', true, phone)}
-        ${input('channel_code', '渠道码', 'text', true, state.profile.channel_code || '')}
+        ${releaseChannelInput()}
         ${input('birthday', '生日', 'date', true)}
         ${input('age', '年龄', 'number', false)}
         ${select('zodiac', '属相', ['鼠','牛','虎','兔','龙','蛇','马','羊','猴','鸡','狗','猪'])}
@@ -247,10 +249,10 @@ function renderMine() {
         ${input('profile_phone', '手机号', 'tel', true, state.profile.phone || '')}
         ${input('profile_nickname', '昵称', 'text', false, state.profile.nickname || '')}
         ${input('profile_channel', '常用渠道码', 'text', false, state.profile.channel_code || '')}
-        ${input('profile_password', '本机密码备注', 'password', false, state.profile.password || '')}
+        ${input('profile_password', '登录密码', 'password', true, '')}
         <div class="field full profile-actions"><button class="secondary" type="submit">登录 / 保存</button>${state.profile.phone ? '<button class="danger" type="button" id="logoutProfileInForm">退出登录</button>' : ''}</div>
       </form>
-      <div id="profileResult" class="result"></div><p class="meta">退出登录不会删除本机订单；用原手机号重新登录后，会再次显示该手机号下的订单。换手机查看请使用需求编号和查询码。</p>
+      <div id="profileResult" class="result"></div><p class="meta">首次登录必须设置密码；后续用同一手机号登录必须输入相同密码。渠道码可留空，系统会自动生成 A0001、A0002 这样的编号。</p>
     </section>
     <section class="split section">
       <div class="panel"><h2>待完成</h2><div class="card-list">${pending.map(cardForBlessing).join('') || '<p class="meta">暂无待完成需求。</p>'}</div></div>
@@ -297,6 +299,12 @@ function select(name, label, options) {
   return `<label class="field">${label}<select name="${name}">${options.map((o) => `<option value="${o}">${o}</option>`).join('')}</select></label>`;
 }
 
+function releaseChannelInput() {
+  const boundCode = state.profile.channel_code || '';
+  if (boundCode) return `<label class="field">渠道码<input name="channel_code" id="channel_code" type="text" value="${escapeHtml(boundCode)}" readonly></label>`;
+  return input('channel_code', '渠道码', 'text', true);
+}
+
 function cardForBlessing(b) {
   const itemText = (b.items || []).map((i) => `${i.ritual_name || ritualName(i.ritual_id)} x ${i.quantity}`).join('，') || b.ritual_name || '';
   return `<article class="ritual-card"><div class="card-head"><strong>${escapeHtml(b.task_id)}</strong><span class="status ${b.status}">${statusText[b.status] || b.status}</span></div><p>${escapeHtml(b.real_name)} · ${escapeHtml(b.birthday)} · ${escapeHtml(itemText)}</p><p class="meta">性别：${escapeHtml(b.sex || '-')} · 年龄：${escapeHtml(b.age || '-')} · 渠道码：${escapeHtml(b.channel_code || '-')}</p><span class="meta">查询码：${escapeHtml(b.access_code || '')}</span><div class="actions"><button class="secondary" data-detail="${b.task_id}">项目详情</button><button class="secondary" data-album="${b.task_id}">查看相册</button></div></article>`;
@@ -304,18 +312,20 @@ function cardForBlessing(b) {
 
 function cardForWorker(b) {
   const itemText = (b.items || []).map((i) => `${i.ritual_name || ritualName(i.ritual_id)} x ${i.quantity}`).join('，') || b.ritual_name || '祈福项目';
+  const current = isCurrentTaker(b);
   const accepted = b.status === 'ACCEPTED';
-  const hasMedia = hasUploadedMedia(b);
+  const canUpload = accepted && current;
+  const canComplete = current && hasCurrentTakerUploaded(b);
   const currentCode = takerCodeById(b.current_taker_id) || b.current_taker_code || b.channel_code || '';
   return `<article class="ritual-card worker-card compact-worker">
     <div class="worker-top"><strong>${escapeHtml(b.real_name || '-')}</strong><span class="status ${b.status}">${statusText[b.status] || b.status}</span></div>
     <div class="worker-info"><span>性别 ${escapeHtml(b.sex || '-')}</span><span>出生 ${escapeHtml(b.birthday || '-')}</span><span>属相 ${escapeHtml(b.zodiac || '-')}</span><span>年龄 ${escapeHtml(b.age || '-')}</span></div>
     <div class="worker-ritual">${escapeHtml(itemText)}</div>
     <div class="worker-meta"><span>${escapeHtml(b.task_id)}</span><span>当前接单员 ${escapeHtml(currentCode || '-')}</span><span>渠道码 ${escapeHtml(b.channel_code || '-')}</span></div>
-    <div class="actions"><button class="secondary" data-detail="${b.task_id}">详情</button><button class="secondary" data-action="accept" data-id="${b.id}" ${accepted ? 'disabled' : ''}>${accepted ? '已接单' : '确认接单'}</button></div>
-    ${accepted ? `<div class="upload-choice"><label class="field upload-field">拍照/选图片<input type="file" accept="image/*" capture="environment" multiple data-files="${b.task_id}"></label><label class="field upload-field">拍视频/选视频<input type="file" accept="video/*,.mp4,.mov,.webm" capture="environment" multiple data-files="${b.task_id}"></label><span class="meta">选择后会先压缩到 1MB 以内，再上传到 R2。</span></div>` : '<div class="notice slim">确认接单后可上传照片/视频，也可直接流转给其他接单员号。</div>'}
-    <label class="field full">流转给其他接单员号<input data-flow-code="${b.id}" type="text" placeholder="输入对方渠道码/接单员号，例如 T002"></label>
-    <div class="actions"><button class="secondary" data-action="assign" data-id="${b.id}">确认流转</button><button class="primary" data-action="complete" data-id="${b.id}" ${hasMedia ? '' : 'disabled'}>${hasMedia ? '完成' : '上传后完成'}</button></div>
+    <div class="actions"><button class="secondary" data-detail="${b.task_id}">详情</button><button class="secondary" data-action="accept" data-id="${b.id}" ${accepted || !current ? 'disabled' : ''}>${accepted ? '已接单' : '确认接单'}</button></div>
+    ${canUpload ? `<div class="upload-choice"><label class="field upload-field">拍照/选图片<input type="file" accept="image/*" capture="environment" multiple data-files="${b.task_id}"></label><label class="field upload-field">拍视频/选视频<input type="file" accept="video/*,.mp4,.mov,.webm" capture="environment" multiple data-files="${b.task_id}"></label><span class="meta">选择后会先压缩到 1MB 以内，再上传到 R2。</span></div>` : '<div class="notice slim">流转后只有当前接单员可以上传照片/视频并完成订单。</div>'}
+    <label class="field full">流转给其他接单员号<input data-flow-code="${b.id}" type="text" placeholder="输入对方渠道码/接单员号，例如 A0002" ${current ? '' : 'disabled'}></label>
+    <div class="actions"><button class="secondary" data-action="assign" data-id="${b.id}" ${current ? '' : 'disabled'}>确认流转</button><button class="primary" data-action="complete" data-id="${b.id}" ${canComplete ? '' : 'disabled'}>${canComplete ? '完成' : '当前接单员上传后完成'}</button></div>
     <div class="upload-preview">${mediaPreviewHtml(b.media || [], b)}</div>
   </article>`;
 }
@@ -410,6 +420,17 @@ function hasUploadedMedia(blessing) {
   return Number(blessing.media_count || 0) > 0 || (blessing.media || []).some((media) => Boolean(mediaUrl(media, blessing)));
 }
 
+function isCurrentTaker(blessing) {
+  return Boolean(state.profile.taker_id && String(blessing.current_taker_id || '') === String(state.profile.taker_id));
+}
+
+function hasCurrentTakerUploaded(blessing) {
+  if (!isCurrentTaker(blessing)) return false;
+  const takerId = String(state.profile.taker_id);
+  if ((blessing.scenarios || []).some((scenario) => String(scenario.uploader_user_id || '') === takerId)) return true;
+  return (blessing.media || []).some((media) => media.uploaded && String(media.uploader_user_id || takerId) === takerId);
+}
+
 function takerName(id) {
   if (!id) return '';
   const taker = state.takers.find((t) => String(t.id) === String(id));
@@ -452,24 +473,35 @@ function bindEvents() {
 async function submitProfile(event) {
   event.preventDefault();
   const form = new FormData(event.target);
-  state.profile = {
+  const draft = {
     phone: String(form.get('profile_phone') || '').trim(),
     nickname: String(form.get('profile_nickname') || '').trim(),
     channel_code: String(form.get('profile_channel') || '').trim(),
     password: String(form.get('profile_password') || '').trim()
   };
-  saveProfile();
-  try {
-    const data = await api('/api/profile', { method: 'POST', body: JSON.stringify(state.profile) });
-    state.profile.taker_id = data.id;
-    state.profile.channel_code = data.taker_code || state.profile.channel_code;
-    saveProfile();
-    document.getElementById('profileResult').innerHTML = '<div class="notice">已登录并同步接单员号。别人填写这个渠道码发布的订单，会进入你的任务台。</div>';
-    await loadWorkerTasks(false);
-  } catch (err) {
-    document.getElementById('profileResult').innerHTML = `<div class="notice">已保存到本机。云端同步失败：${escapeHtml(err.message)}</div>`;
+  if (!draft.phone || !draft.password) {
+    document.getElementById('profileResult').innerHTML = '<div class="notice">手机号和密码必填。</div>';
+    return;
   }
-  render();
+  try {
+    const loginProfile = { ...draft };
+    state.profile = loginProfile;
+    const data = await api('/api/profile', { method: 'POST', body: JSON.stringify(draft) });
+    state.profile = {
+      phone: data.phone || draft.phone,
+      nickname: data.nickname || draft.nickname,
+      channel_code: data.taker_code || draft.channel_code,
+      taker_id: data.id,
+      password: draft.password
+    };
+    saveProfile();
+    document.getElementById('profileResult').innerHTML = `<div class="notice">已登录并绑定渠道码：<strong>${escapeHtml(state.profile.channel_code)}</strong>。发布需求会自动使用此渠道码。</div>`;
+    await loadWorkerTasks(false);
+    render();
+  } catch (err) {
+    state.profile = JSON.parse(localStorage.getItem(storageKeys.profile) || '{}');
+    document.getElementById('profileResult').innerHTML = `<div class="notice">${escapeHtml(err.message || '登录失败')}</div>`;
+  }
 }
 
 function logoutProfile() {
@@ -511,10 +543,15 @@ async function submitRelease(event) {
   const form = new FormData(event.target);
   syncReleaseItems(form);
   const items = state.releaseItems.filter((item) => item.ritual_id && item.quantity > 0);
+  const channelCode = state.profile.channel_code || String(form.get('channel_code') || '').trim();
+  if (!channelCode) {
+    document.getElementById('releaseResult').innerHTML = '<div class="notice">首次未绑定渠道码时，发布需求必须填写渠道码。</div>';
+    return;
+  }
   const body = {
     real_name: form.get('real_name'),
     mobile: form.get('mobile'),
-    channel_code: form.get('channel_code'),
+    channel_code: channelCode,
     birthday: form.get('birthday'),
     age: form.get('age'),
     zodiac: form.get('zodiac'),
@@ -524,12 +561,12 @@ async function submitRelease(event) {
   };
   try {
     const data = await api('/api/blessings', { method: 'POST', body: JSON.stringify(body) });
-    addLocalBlessing(data, body);
+    addLocalBlessing(data, { ...body, channel_code: data.channel_code || body.channel_code });
     document.getElementById('releaseResult').innerHTML = `<div class="notice">创建成功。需求编号：<strong>${escapeHtml(data.task_id)}</strong>，查询码：<strong>${escapeHtml(data.access_code)}</strong></div>`;
     state.releaseItems = [{ ritual_id: state.rituals[0]?.id || 1, quantity: 1 }];
     event.target.reset();
   } catch (err) {
-    const demo = { id: Date.now(), task_id: `FL${Date.now().toString().slice(-8)}`, access_code: String(Math.floor(Math.random() * 900000 + 100000)) };
+    const demo = { id: Date.now(), task_id: `FL${Date.now().toString().slice(-8)}`, access_code: String(Math.floor(Math.random() * 900000 + 100000)), channel_code: channelCode };
     addLocalBlessing(demo, body);
     document.getElementById('releaseResult').innerHTML = `<div class="notice">本机演示已创建。需求编号：<strong>${demo.task_id}</strong>，查询码：<strong>${demo.access_code}</strong></div>`;
   }
@@ -548,7 +585,8 @@ function addLocalBlessing(data, body) {
     sex: body.sex,
     channel_code: body.channel_code,
     remark_text: body.remark_text,
-    current_taker_id: null,
+    current_taker_id: data.current_taker_id || state.profile.taker_id || null,
+    current_taker_code: data.channel_code || body.channel_code || state.profile.channel_code || '',
     items: body.items.map((item) => ({ ...item, ritual_name: ritualName(item.ritual_id) })),
     media: [],
     records: [{ action: 'CREATED', note: '创建祈福需求', created_at: new Date().toLocaleString() }],
@@ -629,6 +667,10 @@ function bindModalClose() {
 async function attachMedia(taskId, files) {
   const item = state.blessings.find((b) => b.task_id === taskId);
   if (!item || !files?.length) return;
+  if (!isCurrentTaker(item)) {
+    setWorkerMessage('只有当前接单员可以上传照片/视频。');
+    return;
+  }
   if (item.status !== 'ACCEPTED') {
     setWorkerMessage('请先确认接单，再上传照片/视频。');
     return;
@@ -661,7 +703,9 @@ async function attachMedia(taskId, files) {
   const localMedia = await Promise.all(fileList.map(fileToMedia));
   item.media = item.media || [];
   if (uploaded.length) {
-    item.media.push(...uploaded.map((file, index) => ({ ...file, data_url: localMedia[index]?.data_url || '', uploaded: true })));
+    item.media.push(...uploaded.map((file, index) => ({ ...file, data_url: localMedia[index]?.data_url || '', uploaded: true, uploader_user_id: state.profile.taker_id || null })));
+    item.scenarios = item.scenarios || [];
+    item.scenarios.unshift({ uploader_user_id: state.profile.taker_id || null, note: '接单员上传现场照片/视频', created_at: new Date().toLocaleString() });
     item.media_count = Number(item.media_count || 0) + uploaded.length;
   } else {
     item.media.push(...localMedia);
@@ -809,8 +853,12 @@ async function loadAdmin() {
 
 async function updateBlessing(id, action) {
   const item = state.blessings.find((b) => String(b.id) === String(id));
-  if (action === 'complete' && item && !hasUploadedMedia(item)) {
-    setWorkerMessage('请先上传照片或视频，再点击完成。');
+  if (item && action !== 'accept' && !isCurrentTaker(item)) {
+    setWorkerMessage('只有当前接单员可以操作这条需求。');
+    return;
+  }
+  if (action === 'complete' && item && !hasCurrentTakerUploaded(item)) {
+    setWorkerMessage('只有当前接单员上传照片或视频后才能完成订单。');
     return;
   }
   const flowInput = Array.from(document.querySelectorAll('[data-flow-code]')).find((node) => String(node.dataset.flowCode) === String(id));

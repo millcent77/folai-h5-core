@@ -1,4 +1,4 @@
-import { ok, error, readJson, getPathId, requireAdmin, makeTaskId, getTakerIdentity, ensureTakerUser, canAccessBlessing } from '../_shared.js';
+import { ok, error, readJson, getPathId, requireAdmin, makeTaskId, getTakerIdentity, canAccessBlessing, canOperateBlessing } from '../_shared.js';
 
 function makeAccessCode() { return String(Math.floor(Math.random() * 900000 + 100000)); }
 function maskMobile(value = '') { if (!value || value.length < 7) return value || ''; return value.slice(0, 3) + '****' + value.slice(-4); }
@@ -7,10 +7,10 @@ function normalizeStatus(status) { const allowed = ['PENDING', 'ACCEPTED', 'COMP
 async function blessingDetail(db, id) {
   const info = await db.prepare('SELECT * FROM blessings WHERE id = ?').bind(id).first();
   if (!info) return null;
-  const items = await db.prepare('SELECT * FROM blessing_items WHERE blessing_id = ? ORDER BY id').bind(id).all();
-  const records = await db.prepare('SELECT * FROM blessing_records WHERE blessing_id = ? ORDER BY created_at, id').bind(id).all();
-  const scenarios = await db.prepare('SELECT * FROM scenarios WHERE blessing_id = ? ORDER BY created_at DESC, id DESC').bind(id).all();
-  const media = await db.prepare("SELECT id, owner_type, owner_id, r2_key, url, filename, content_type, size, created_at FROM media_files WHERE owner_id = ? AND owner_type IN ('scenario','blessing') ORDER BY created_at DESC, id DESC").bind(id).all();
+  const items = await db.prepare('SELECT * FROM blessing_items WHERE blessing_id = ? ORDER BY id').bind(info.id).all();
+  const records = await db.prepare('SELECT * FROM blessing_records WHERE blessing_id = ? ORDER BY created_at, id').bind(info.id).all();
+  const scenarios = await db.prepare('SELECT * FROM scenarios WHERE blessing_id = ? ORDER BY created_at DESC, id DESC').bind(info.id).all();
+  const media = await db.prepare("SELECT id, owner_type, owner_id, r2_key, url, filename, content_type, size, created_at FROM media_files WHERE owner_id = ? AND owner_type IN ('scenario','blessing') ORDER BY created_at DESC, id DESC").bind(info.id).all();
   return { info, items: items.results || [], records: records.results || [], scenarios: scenarios.results || [], media: media.results || [] };
 }
 
@@ -20,6 +20,16 @@ function safeListRow(row, admin = false) {
 
 function safeDetail(detail, admin = false) {
   return { ...detail, info: { ...detail.info, access_code: undefined, mobile: admin ? detail.info.mobile : maskMobile(detail.info.mobile) } };
+}
+
+async function findActiveTakerByCode(db, code) {
+  if (!code) return null;
+  return await db.prepare("SELECT * FROM users WHERE role = 'taker' AND status = 'ACTIVE' AND taker_code = ?").bind(code).first();
+}
+
+async function hasMediaFromTaker(db, blessingId, takerId) {
+  const row = await db.prepare("SELECT id FROM scenarios WHERE blessing_id = ? AND uploader_user_id = ? LIMIT 1").bind(blessingId, takerId).first();
+  return Boolean(row);
 }
 
 export async function onRequestGet(context) {
@@ -64,17 +74,25 @@ export async function onRequestPost({ request, env }) {
   const body = await readJson(request);
   const realName = String(body.real_name || '').trim();
   const birthday = String(body.birthday || '').trim();
-  const channelCode = String(body.channel_code || '').trim();
   const items = Array.isArray(body.items) ? body.items : [];
-  if (!realName || !birthday || !channelCode || items.length === 0) return error('姓名、生日、渠道码和祈福项目必填');
+  if (!realName || !birthday || items.length === 0) return error('姓名、生日和祈福项目必填');
   const taskId = makeTaskId();
   const accessCode = makeAccessCode();
-  if (!env.DB) return ok({ task_id: taskId, access_code: accessCode, demo: true }, '演示模式：需求已模拟提交');
+  if (!env.DB) {
+    const demoChannelCode = String(body.channel_code || '').trim();
+    if (!demoChannelCode) return error('首次未绑定渠道码时，发布需求必须填写渠道码');
+    return ok({ task_id: taskId, access_code: accessCode, demo: true, channel_code: demoChannelCode }, '演示模式：需求已模拟提交');
+  }
+
+  const takerProfile = await getTakerIdentity(request, env);
+  const channelCode = takerProfile?.taker_code || String(body.channel_code || '').trim();
+  if (!channelCode) return error('首次未绑定渠道码时，发布需求必须填写渠道码');
+  const targetTaker = takerProfile || await findActiveTakerByCode(env.DB, channelCode);
+  if (!targetTaker) return error('渠道码不存在，请确认后再发布');
 
   const remarkImages = Array.isArray(body.remark_images) ? body.remark_images.join(',') : '';
-  const taker = await ensureTakerUser(env.DB, { taker_code: channelCode, nickname: channelCode, real_name: channelCode });
   const insert = await env.DB.prepare('INSERT INTO blessings (task_id, access_code, channel_code, real_name, mobile, birthday, age, zodiac, sex, remark_text, remark_images, current_taker_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
-    .bind(taskId, accessCode, channelCode, realName, body.mobile || '', birthday, Number(body.age || 0), body.zodiac || '', body.sex || '', body.remark_text || '', remarkImages, taker?.id || null)
+    .bind(taskId, accessCode, channelCode, realName, body.mobile || '', birthday, Number(body.age || 0), body.zodiac || '', body.sex || '', body.remark_text || '', remarkImages, targetTaker.id)
     .run();
   const blessingId = insert.meta.last_row_id;
 
@@ -84,8 +102,8 @@ export async function onRequestPost({ request, env }) {
     if (!ritual) continue;
     await env.DB.prepare('INSERT INTO blessing_items (blessing_id, ritual_id, ritual_name, quantity) VALUES (?, ?, ?, ?)').bind(blessingId, ritual.id, ritual.name, Number(item.quantity || 1)).run();
   }
-  await env.DB.prepare('INSERT INTO blessing_records (blessing_id, action, to_taker_id, note) VALUES (?, ?, ?, ?)').bind(blessingId, 'CREATED', taker?.id || null, '创建祈福需求，自动分配到渠道码 ' + channelCode).run();
-  return ok({ id: blessingId, task_id: taskId, access_code: accessCode }, '需求创建成功');
+  await env.DB.prepare('INSERT INTO blessing_records (blessing_id, action, to_taker_id, note) VALUES (?, ?, ?, ?)').bind(blessingId, 'CREATED', targetTaker.id, '创建祈福需求，自动分配到渠道码 ' + channelCode).run();
+  return ok({ id: blessingId, task_id: taskId, access_code: accessCode, channel_code: channelCode, current_taker_id: targetTaker.id }, '需求创建成功');
 }
 
 export async function onRequestPatch(context) {
@@ -98,28 +116,25 @@ export async function onRequestPatch(context) {
   const action = body.action;
   const blessing = await env.DB.prepare('SELECT * FROM blessings WHERE id = ?').bind(id).first();
   if (!blessing) return error('祈福需求不存在', 404);
-  const taker = admin ? null : await getTakerIdentity(request, env, { create: true });
-  const allowed = admin || await canAccessBlessing(env.DB, blessing, taker);
-  if (!allowed) return error('此接单员不能操作这条需求', 403);
+  const taker = admin ? null : await getTakerIdentity(request, env);
+  if (!admin && !canOperateBlessing(blessing, taker)) return error('只有当前接单员可以操作这条需求', 403);
   const actorId = admin ? (Number(body.actor_user_id || 0) || null) : taker.id;
   const fromTakerId = Number(blessing.current_taker_id || 0) || (taker?.id || null);
 
   if (action === 'assign') {
     const targetCode = String(body.taker_code || '').trim();
-    let target = null;
-    if (targetCode) target = await ensureTakerUser(env.DB, { taker_code: targetCode, nickname: targetCode, real_name: targetCode });
-    const takerId = Number(body.taker_id || target?.id || 0);
-    if (!takerId) return error('请输入要流转的渠道码/接单员号');
+    const target = await findActiveTakerByCode(env.DB, targetCode);
+    if (!target) return error('请输入已注册的渠道码/接单员号');
     await env.DB.batch([
-      env.DB.prepare("UPDATE blessings SET current_taker_id = ?, status = 'PENDING', updated_at = datetime('now') WHERE id = ?").bind(takerId, id),
-      env.DB.prepare('INSERT INTO blessing_records (blessing_id, actor_user_id, action, from_taker_id, to_taker_id, note) VALUES (?, ?, ?, ?, ?, ?)').bind(id, actorId, 'ASSIGNED', fromTakerId, takerId, '流转给接单员 ' + (targetCode || takerId))
+      env.DB.prepare("UPDATE blessings SET current_taker_id = ?, status = 'PENDING', updated_at = datetime('now') WHERE id = ?").bind(target.id, id),
+      env.DB.prepare('INSERT INTO blessing_records (blessing_id, actor_user_id, action, from_taker_id, to_taker_id, note) VALUES (?, ?, ?, ?, ?, ?)').bind(id, actorId, 'ASSIGNED', fromTakerId, target.id, '流转给接单员 ' + targetCode)
     ]);
     return ok(await blessingDetail(env.DB, id), '已流转分配');
   }
 
   if (action === 'complete') {
-    const media = await env.DB.prepare("SELECT id FROM media_files WHERE owner_id = ? AND owner_type IN ('scenario','blessing') LIMIT 1").bind(id).first();
-    if (!media) return error('请先上传照片或视频，再完成需求', 400);
+    const currentTakerId = admin ? Number(blessing.current_taker_id || 0) : taker.id;
+    if (!currentTakerId || !await hasMediaFromTaker(env.DB, id, currentTakerId)) return error('只有当前最终接单员上传照片或视频后才能完成订单', 400);
   }
 
   const nextStatus = { accept: 'ACCEPTED', complete: 'COMPLETED', cancel: 'CANCELLED', return: 'RETURNED' }[action];
@@ -128,11 +143,8 @@ export async function onRequestPatch(context) {
   if (!nextStatus) return error('未知操作');
   const completedSql = action === 'complete' ? ", completed_at = datetime('now')" : '';
   const acceptedSql = action === 'accept' ? ", accepted_at = datetime('now')" : '';
-  const assignSelfSql = action === 'accept' && taker?.id ? ', current_taker_id = ?' : '';
-  const updateStmt = env.DB.prepare('UPDATE blessings SET status = ?' + completedSql + acceptedSql + assignSelfSql + ", updated_at = datetime('now') WHERE id = ?");
-  const updateArgs = action === 'accept' && taker?.id ? [nextStatus, taker.id, id] : [nextStatus, id];
   await env.DB.batch([
-    updateStmt.bind(...updateArgs),
+    env.DB.prepare('UPDATE blessings SET status = ?' + completedSql + acceptedSql + ", updated_at = datetime('now') WHERE id = ?").bind(nextStatus, id),
     env.DB.prepare('INSERT INTO blessing_records (blessing_id, actor_user_id, action, from_taker_id, note) VALUES (?, ?, ?, ?, ?)').bind(id, actorId, recordAction, fromTakerId, note)
   ]);
   return ok(await blessingDetail(env.DB, id), note);

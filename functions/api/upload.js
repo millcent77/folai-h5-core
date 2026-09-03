@@ -1,4 +1,4 @@
-import { ok, error, requireAdmin, getTakerIdentity, canAccessBlessing } from './_shared.js';
+import { ok, error, requireAdmin, getTakerIdentity, canOperateBlessing } from './_shared.js';
 
 function makeKey(file) {
   const safe = (file.name || 'upload.bin').replace(/[^a-zA-Z0-9._-]/g, '_');
@@ -7,8 +7,8 @@ function makeKey(file) {
 
 export async function onRequestPost({ request, env }) {
   const admin = requireAdmin(request, env);
-  const taker = admin ? null : await getTakerIdentity(request, env, { create: true });
-  if (!admin && !taker) return error('请先用手机号和渠道码/接单员号登录后上传', 401);
+  const taker = admin ? null : await getTakerIdentity(request, env);
+  if (!admin && !taker) return error('请先用手机号、密码和渠道码/接单员号登录后上传', 401);
   if (!env.PRAYER_MEDIA) return error('R2 未绑定，不能上传文件', 503);
 
   const form = await request.formData();
@@ -20,8 +20,8 @@ export async function onRequestPost({ request, env }) {
   if (!env.DB && !admin) return error('D1 未绑定，不能验证接单员上传权限', 503);
   if (env.DB && ownerId && !admin) {
     const blessing = await env.DB.prepare('SELECT * FROM blessings WHERE id = ?').bind(ownerId).first();
-    const allowed = await canAccessBlessing(env.DB, blessing, taker);
-    if (!allowed) return error('此接单员不能给这条需求上传文件', 403);
+    if (!canOperateBlessing(blessing, taker)) return error('只有当前接单员可以给这条需求上传文件', 403);
+    if (blessing.status !== 'ACCEPTED') return error('请先确认接单，再上传照片或视频', 400);
   }
 
   const uploaded = [];
